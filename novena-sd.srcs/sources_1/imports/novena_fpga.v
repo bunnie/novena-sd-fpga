@@ -1,24 +1,22 @@
+//////////////////////////////////////////////////////////////////////////////
+// Copyright (c) 2013, Andrew "bunnie" Huang
+//
+// See the NOTICE file distributed with this work for additional 
+// information regarding copyright ownership.  The copyright holder 
+// licenses this file to you under the Apache License, Version 2.0 
+// (the "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// code distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+//////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 02/15/2013 06:36:32 PM
-// Design Name: 
-// Module Name: novena_fpga
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
-
 
 module novena_fpga(
 		   output wire       APOPTOSIS,
@@ -94,6 +92,30 @@ module novena_fpga(
 //		   input wire F_LVDS_CK_N[1:0],
 //		   input wire F_LVDS_CK_P[1:0],
 
+		   inout wire F_LVDS_N2,  // DAT2
+		   inout wire F_DX14,     // DAT1
+		   inout wire F_LVDS_P4,  // DAT0, DO
+		   inout wire F_LVDS_N4,  // CLK, SCLK
+		   inout wire F_LVDS_P1,  // CMD, DI
+		   inout wire F_LVDS_N1,  // DAT3, CS
+
+		   inout wire F_DX0,      // IO7
+		   inout wire F_DX3,      // IO6
+		   inout wire F_DX2,      // IO5
+		   inout wire F_DX11,     // IO4
+		   inout wire F_LVDS_N11, // IO3
+		   inout wire F_DX1,      // IO2
+		   inout wire F_LVDS_NC,  // IO1
+		   inout wire F_LVDS_PC,  // IO0
+
+		   inout wire F_LVDS_N0, // R/B
+		   input wire  F_LVDS_P0,  // CS
+		   input wire  F_LVDS_CK_P1, // RE
+		   input wire  F_LVDS_P15, // CLE
+		   input wire  F_LVDS_NB,  // ALE
+		   input wire  F_LVDS_PB,  // WE
+		   input wire  F_DX17,     // WP
+
 		   inout wire [15:0] F_DDR3_D,
 		   inout wire F_UDQS_N,
 		   inout wire F_UDQS_P,
@@ -165,6 +187,12 @@ module novena_fpga(
    
    wire 		      reset;
 
+
+   wire [15:0] 		      gpioA_din;
+   wire [15:0] 		      gpioA_dout;
+   wire [15:0] 		      gpioA_dir;
+   
+
    ////////////////////////////////////
    ///// MASTER RESET
    ////////////////////////////////////
@@ -186,20 +214,141 @@ module novena_fpga(
    
    wire [15:0]	      bram_dout;
    
-   novena_eim novena_eim (
-	      .din(eim_din),
-	      .dout(bram_dout),
-	      .clk(clk),
-	      .reset(reset),
+   wire [15:0] 	      ram_adr;
+   wire [7:0] 	      ram_d_to_ram;
+   wire [7:0] 	      ram_d_from_ram;
+   wire 	      ram_we;
+   wire 	      ram_clk_to_ram;
 
-	      .bclk(bclk_dll),
-	      .cs(EIM_CS),
-	      .hi_addr(EIM_A),
-	      .lba(EIM_LBA),
-	      .oe(EIM_OE),
-	      .rw(EIM_RW),
-	      .rb_wait(EIM_WAIT)
+   novena_eim novena_eim (
+			  .din(eim_din),
+			  .dout(bram_dout),
+			  .clk(clk50),
+			  .reset(reset),
+
+			  .bclk(bclk_dll),
+			  .cs(EIM_CS),
+			  .hi_addr(EIM_A),
+			  .lba(EIM_LBA),
+			  .oe(EIM_OE),
+			  .rw(EIM_RW),
+			  .rb_wait(EIM_WAIT),
+
+			  .nram_clk(ram_clk_to_ram),
+			  .nram_a(ram_adr),
+			  .nram_din(ram_d_to_ram),
+			  .nram_dout(ram_d_from_ram),
+			  .nram_we(ram_we)
 			  );
+
+   ////////////////////////////////////
+   ///// Romulator -- emulate a ROM from EIM
+   ////////////////////////////////////
+   wire [7:0] 	      nand_din;
+   wire [7:0] 	      nand_dout;
+   wire 	      nand_drive_out;
+   wire 	      nand_rb;
+   wire 	      romulator_on;
+   wire 	      nand_re, nand_re_ibufg;
+   wire 	      nand_we, nand_we_ibufg;
+
+   assign romulator_on = 1'b1;  // for now, jammed on; but later turn off for snooping modes
+   
+   assign nand_din = {F_DX0, F_DX3, F_DX2, F_DX11, F_LVDS_N11, F_DX1, F_LVDS_NC, F_LVDS_PC};
+   assign F_LVDS_PC  = (nand_drive_out & romulator_on) ? nand_dout[0] : 1'bZ;
+   assign F_LVDS_NC  = (nand_drive_out & romulator_on) ? nand_dout[1] : 1'bZ;
+   assign F_DX1      = (nand_drive_out & romulator_on) ? nand_dout[2] : 1'bZ;
+   assign F_LVDS_N11 = (nand_drive_out & romulator_on) ? nand_dout[3] : 1'bZ;
+   assign F_DX11     = (nand_drive_out & romulator_on) ? nand_dout[4] : 1'bZ;
+   assign F_DX2      = (nand_drive_out & romulator_on) ? nand_dout[5] : 1'bZ;
+   assign F_DX3      = (nand_drive_out & romulator_on) ? nand_dout[6] : 1'bZ;
+   assign F_DX0      = (nand_drive_out & romulator_on) ? nand_dout[7] : 1'bZ;
+
+   assign F_LVDS_N0  = romulator_on ? nand_rb : 1'bZ;
+
+   // nand_re, nand_we are edge signals, so use a BUFG to distribute as clock
+   IBUFG nand_we_ibufgp(.I(F_LVDS_PB), .O(nand_we_ibufg) );
+   BUFG  nand_we_bufgp(.I(nand_we_ibufg), .O(nand_we) );
+   IBUFG nand_re_ibufgp(.I(F_LVDS_CK_P1), .O(nand_re_ibufg) );
+   BUFG  nand_re_bufgp(.I(nand_re_ibufg), .O(nand_re) );
+   
+   wire [7:0] 	      nand_uk_cmd;
+   wire 	      nand_uk_updated;
+   
+   romulator romulator(
+		       .clk(bclk_dll),  // 133 MHz
+		       
+		       .nand_we(nand_we),
+		       .nand_re(nand_re),
+		       .nand_cs(F_LVDS_P0),
+		       .nand_ale(F_LVDS_NB),
+		       .nand_cle(F_LVDS_P15),
+		       .nand_rb(nand_rb),
+		       .nand_wp(F_DX17),
+
+		       .nand_din(nand_din),
+		       .nand_dout(nand_dout),
+		       .nand_drive_out(nand_drive_out),
+
+		       .ram_adr(ram_adr),
+		       .ram_d_to_ram(ram_d_to_ram),
+		       .ram_d_from_ram(ram_d_from_ram),
+		       .ram_we(ram_we),
+		       .ram_clk_to_ram(ram_clk_to_ram),
+
+		       .nand_uk_cmd(nand_uk_cmd),
+		       .nand_uk_cmd_updated(nand_uk_updated),
+		       
+		       .reset(reset)
+		       );
+   
+		       
+   ////////////////////////////////////
+   ///// Unknown romulator commands FIFO -- track errors and what we left on the floor
+   ////////////////////////////////////
+   wire nand_uk_updated_pulse;
+   reg 	nuk_up_d;
+   wire ukfifo_full, ukfifo_over, ukfifo_empty, ukfifo_rst;
+   wire ukfifo_rd_pulse;
+   wire [11:0] ukfifo_count;
+   wire [7:0]  ukfifo_data;
+
+   always @(posedge bclk_dll) begin
+      nuk_up_d <= nand_uk_updated;
+   end
+   assign nand_uk_updated_pulse = !nuk_up_d && nand_uk_updated;
+   
+   uk_fifo uk_fifo(
+		   .rst(ukfifo_rst),
+		   .wr_clk(bclk_dll),
+		   .rd_clk(bclk_dll),
+		   .din(nand_uk_cmd[7:0]),
+		   .wr_en(nand_uk_updated_pulse),
+		   .rd_en(ukfifo_rd_pulse),
+		   .dout(ukfifo_data[7:0]),
+		   .full(ukfifo_full),
+		   .overflow(ukfifo_over),
+		   .empty(ukfifo_empty),
+		   .rd_data_count(ukfifo_count[11:0])
+		   );
+      
+   ////////////////////////////////////
+   ///// GPIO pins
+   ////////////////////////////////////
+   assign gpioA_din[0] = F_LVDS_P4; // d0, do
+   assign gpioA_din[1] = F_DX14;    // d1
+   assign gpioA_din[2] = F_LVDS_N2; // d2
+   assign gpioA_din[3] = F_LVDS_N1; // d3, cs
+   assign gpioA_din[4] = F_LVDS_N4; // clk, sclk
+   assign gpioA_din[5] = F_LVDS_P1; // cmd, di
+
+   assign F_LVDS_P4 = gpioA_dir[0] ? gpioA_dout[0] : 1'bZ;
+   assign F_DX14    = gpioA_dir[1] ? gpioA_dout[1] : 1'bZ;
+   assign F_LVDS_N2 = gpioA_dir[2] ? gpioA_dout[2] : 1'bZ;
+   assign F_LVDS_N1 = gpioA_dir[3] ? gpioA_dout[3] : 1'bZ;
+   assign F_LVDS_N4 = gpioA_dir[4] ? gpioA_dout[4] : 1'bZ;
+   assign F_LVDS_P1 = gpioA_dir[5] ? gpioA_dout[5] : 1'bZ;
+   
 
    ////////////////////////////////////
    ///// Register set -- area-inefficient, high fan-out/in registers for controlling/monitoring internal signals
@@ -233,59 +382,75 @@ module novena_fpga(
 
    //////// write-only registers
    reg_wo reg_wo_40000 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40000),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( r40000wo[15:0] ) );
    
    reg_wo reg_wo_40002 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40002),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(1'b0), .rbk_d(ro_d), // unreadable
 			 .reg_d( r40002wo[15:0] ) );
 
+   ///// GPIO registers
+   reg_wo reg_wo_40010 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40010),
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
+			 .reg_d( gpioA_dout[15:0] ) );
+
+   reg_wo reg_wo_40012 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40012),
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
+			 .reg_d( gpioA_dir[15:0] ) );
+			 
    // write control for p2
    // check alignment of verilog when port specs are too short
    reg_wo reg_wo_40020 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40020),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {ddr3_p2_cmd_bl[5:0], 
 				  ddr3_p2_cmd_en, ddr3_p2_cmd_instr[2:0] } ) );
 
    reg_wo reg_wo_40022 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40022),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_cmd_byte_addr[15:0] ) );
 
    reg_wo reg_wo_40024 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40024),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_cmd_byte_addr[29:16] ) );
 
    reg_wo reg_wo_40026 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40026),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {ddr3_p2_wr_en, ddr3_p2_wr_mask[3:0]} ) );
 
    reg_wo reg_wo_40028 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40028),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_wr_data[15:0] ) );
 
    reg_wo reg_wo_4002A ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4002A),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_wr_data[31:16] ) );
    
    // read control for p3
    reg_wo reg_wo_40030 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40030),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {ddr3_p3_cmd_bl[5:0], 
 				  ddr3_p3_cmd_en, ddr3_p3_cmd_instr[2:0] } ) );
 
    reg_wo reg_wo_40032 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40032),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p3_cmd_byte_addr[15:0] ) );
 
    reg_wo reg_wo_40034 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40034),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p3_cmd_byte_addr[29:16] ) );
 
 
    wire [3:0]        ddr3_p3_dummy;
    reg_wo reg_wo_40036 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40036),
-			 .bus_d(din_r), .we(!cs0_r && !rw_r), 
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {ddr3_p3_rd_en, ddr3_p3_dummy[3:0]} ) );
+
+   // write control for romulator
+   wire 	     rom_dummy;
+   reg_wo reg_wo_40100 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40100),
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
+			 .reg_d( {ukfifo_rst, rom_dummy} ) );
+
 			 
    //////// read-only registers
    // loopback readback
@@ -304,6 +469,11 @@ module novena_fpga(
    reg_ro reg_ro_41004 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41004),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {ddr3_calib_done, ddr3_dll_locked} ) );
+
+   //// GPIO registers
+   reg_ro reg_ro_41010 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41010),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( gpioA_din[15:0] ) );
 
    /////// ddr p2 write status
    reg_ro reg_ro_41020 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41020),
@@ -330,25 +500,56 @@ module novena_fpga(
    reg_ro reg_ro_41034 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41034),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( ddr3_p3_rd_data[31:16] ) );
+
+   // read status & data for romulator
+   reg_ro reg_ro_41100 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41100),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {8'b0, ukfifo_data[7:0]} ) );
+
+   ///// **** validation note: it's possible for pulse to false-trigger if bus_addr glitches to my_a
+   ///// **** so keep a look out for that from the ukfifo_count and make sure it's monotonically decreasing
+   ///// **** as part of validation
+   reg_r_det reg_det_41100 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41100),
+			 .ena(!cs0_r && rw_r),
+			 .pulse( ukfifo_rd_pulse ) );
+				
+   reg_ro reg_ro_41102 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41102),
+			 .re(!cs0_r && rw_r),
+			 .reg_d( {1'b0, ukfifo_full, ukfifo_over, ukfifo_empty, ukfifo_count[11:0]} ) );
    
    
    // FPGA minor version code
    reg_ro reg_ro_41FFC ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFC),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
-			 .reg_d( 16'h0001 ) );
+			 .reg_d( 16'h0003 ) );
 
    // FPGA major version code
    reg_ro reg_ro_41FFE ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFE),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( 16'h0001 ) );
 
+   ////////// VERSION LOG (major version 0001) /////////////
+   // minor version 0001, May 26 2013
+   //    Initial test release. Has 32kiB of mapped 16-bit RAM at 0x0800.0000 - 0x0800.7FFE
+   //    write-only registers are from 0x0804.0000 - 0x0804.0FFE, 16-bit only
+   //    read-only registers are from 0x0804.1000 - 0x0804.1FFE, 16-bit only
+   //    Register set features include loop-back tests, as well as DDR3 interface tests
+   //    DDR3 memory interface is integrated but untested.
+   //////
+   // Minor version 0002, May 27 2013
+   //    add gpioA bank for SD card application. SD interface only wired up for now.
+   //////
+   // Minor version 0003, May 27 2013
+   //    fix various bugs to DDR3 memory interface; add level-to-pulse converters on enables
+   //////
+   
    // mux between block memory and register set based on high bits
    assign eim_dout = (bus_addr[18:16] != 3'b000) ? ro_d : bram_dout;
 
    //////////////
    /// "heartbeat" counter
    //////////////
-   always @(posedge clk) begin
+   always @(posedge clk50) begin
       counter <= counter + 1;
    end
 
@@ -392,6 +593,13 @@ module novena_fpga(
 			    .RESET(reset),
 			    .LOCKED(ddr3_dll_locked)
 			    );
+
+   wire p2_cmd_en_pulse, p2_wr_en_pulse, p3_cmd_en_pulse, p3_rd_en_pulse;
+   rising_edge p2cmdp2e( .clk(bclk_dll), .level(ddr3_p2_cmd_en), .pulse(p2_cmd_en_pulse) );
+   rising_edge p2wrp2e( .clk(bclk_dll), .level(ddr3_p2_wr_en), .pulse(p2_wr_en_pulse) );
+   rising_edge p3cmdp2e( .clk(bclk_dll), .level(ddr3_p3_cmd_en), .pulse(p3_cmd_en_pulse) );
+   rising_edge p2rdp2e( .clk(bclk_dll), .level(ddr3_p3_rd_en), .pulse(p3_rd_en_pulse) );
+   
    
    ddr3_if # (
 	      .C1_P0_MASK_SIZE(4),
@@ -437,16 +645,18 @@ module novena_fpga(
 	      .c1_calib_done    (ddr3_calib_done),
 	      .mcb1_rzq               (F_DDR3_RZQ),  
 	      .mcb1_zio               (F_DDR3_ZIO),
-	
+
+	      /////////////// TODO: add a rising edge detector onto all of the command/read/write enables!!!!!!
+	      
 	      .c1_p2_cmd_clk                          (bclk_dll),
-	      .c1_p2_cmd_en                           (ddr3_p2_cmd_en),
+	      .c1_p2_cmd_en                           (p2_cmd_en_pulse),
 	      .c1_p2_cmd_instr                        (ddr3_p2_cmd_instr),
 	      .c1_p2_cmd_bl                           (ddr3_p2_cmd_bl),
 	      .c1_p2_cmd_byte_addr                    (ddr3_p2_cmd_byte_addr),
 	      .c1_p2_cmd_empty                        (ddr3_p2_cmd_empty),
 	      .c1_p2_cmd_full                         (ddr3_p2_cmd_full),
 	      .c1_p2_wr_clk                           (bclk_dll),
-	      .c1_p2_wr_en                            (ddr3_p2_wr_en),
+	      .c1_p2_wr_en                            (p2_wr_en_pulse),
 	      .c1_p2_wr_mask                          (ddr3_p2_wr_mask),
 	      .c1_p2_wr_data                          (ddr3_p2_wr_data),
 	      .c1_p2_wr_full                          (ddr3_p2_wr_full),
@@ -455,14 +665,14 @@ module novena_fpga(
 	      .c1_p2_wr_underrun                      (ddr3_p2_wr_underrun),
 	      .c1_p2_wr_error                         (ddr3_p2_wr_error),
 	      .c1_p3_cmd_clk                          (bclk_dll),
-	      .c1_p3_cmd_en                           (ddr3_p3_cmd_en),
+	      .c1_p3_cmd_en                           (p3_cmd_en_pulse),
 	      .c1_p3_cmd_instr                        (ddr3_p3_cmd_instr),
 	      .c1_p3_cmd_bl                           (ddr3_p3_cmd_bl),
 	      .c1_p3_cmd_byte_addr                    (ddr3_p3_cmd_byte_addr),
 	      .c1_p3_cmd_empty                        (ddr3_p3_cmd_empty),
 	      .c1_p3_cmd_full                         (ddr3_p3_cmd_full),
 	      .c1_p3_rd_clk                           (bclk_dll),
-	      .c1_p3_rd_en                            (ddr3_p3_rd_en),
+	      .c1_p3_rd_en                            (p3_rd_en_pulse),
 	      .c1_p3_rd_data                          (ddr3_p3_rd_data),
 	      .c1_p3_rd_full                          (ddr3_p3_rd_full),
 	      .c1_p3_rd_empty                         (ddr3_p3_rd_empty),

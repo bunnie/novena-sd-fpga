@@ -1,3 +1,22 @@
+//////////////////////////////////////////////////////////////////////////////
+// Copyright (c) 2013, Andrew "bunnie" Huang
+//
+// See the NOTICE file distributed with this work for additional 
+// information regarding copyright ownership.  The copyright holder 
+// licenses this file to you under the Apache License, Version 2.0 
+// (the "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// code distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+//////////////////////////////////////////////////////////////////////////////
+
 module novena_eim(
 		  input wire [15:0] din,
 		  output wire [15:0] dout,
@@ -10,7 +29,14 @@ module novena_eim(
 		  input wire lba,
 		  input wire oe,
 		  input wire rw,
-		  output wire rb_wait
+		  output wire rb_wait,
+
+		  input nram_clk,
+		  input [15:0] nram_a,
+		  input [7:0] nram_din,
+		  output [7:0] nram_dout,
+		  input nram_we
+		  
 		  );
 
    reg 		      bus_write;
@@ -33,15 +59,19 @@ module novena_eim(
       lba_r <= lba;
    end
 
-   eimram eimram(
+   novena_eim2 eimram(
 		   .clka(bclk),
 		   .ena(!cs0_r),
-		   .wea({!rw_r,!rw_r}),
+		   .wea(!rw_r),
 		   .addra(bus_addr[15:1]),
-		   .dina(din_r),
-		   .clkb(bclk),
-		   .addrb(bus_addr[15:1]),
-		   .doutb(dout[15:0])
+		   .douta(dout[15:0]),
+		   .dina(din_r[15:0]),
+		      
+		   .clkb(nram_clk),
+		   .addrb(nram_a[15:0]),
+		   .web(nram_we),
+		   .dinb(nram_din),
+		   .doutb(nram_dout)
 		   );
 
    always @(posedge bclk) begin

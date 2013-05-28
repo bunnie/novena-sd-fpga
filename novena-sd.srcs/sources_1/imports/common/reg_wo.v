@@ -4,7 +4,9 @@ module reg_wo(
 	      input wire [18:0] my_a,
 	      input wire [15:0] bus_d,
 	      input wire we,
-	      output wire [15:0] reg_d
+	      input wire re,
+	      output wire [15:0] reg_d,
+	      output reg [15:0] rbk_d
 	      );
 
    reg [15:0] 			 state;
@@ -18,5 +20,13 @@ module reg_wo(
    end
 
    assign reg_d = state;
+
+   always @(bus_a or my_a or re) begin
+      if( (bus_a[18:1] == my_a[18:1]) && re ) begin
+	 rbk_d = state;
+      end else begin
+	 rbk_d = 16'hZZZZ;
+      end
+   end
 
 endmodule // reg_wo
