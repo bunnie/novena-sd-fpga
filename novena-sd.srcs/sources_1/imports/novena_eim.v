@@ -61,7 +61,7 @@ module novena_eim(
 
    novena_eim2 eimram(
 		   .clka(bclk),
-		   .ena(!cs0_r),
+		   .ena(!cs0_r && (bus_addr[18:16] == 3'b0)),
 		   .wea(!rw_r),
 		   .addra(bus_addr[15:1]),
 		   .douta(dout[15:0]),

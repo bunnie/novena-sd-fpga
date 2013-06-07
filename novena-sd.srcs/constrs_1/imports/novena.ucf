@@ -36,6 +36,10 @@ TIMESPEC TS_bclk = PERIOD "bclk_tnm" 133 MHz;
 PIN "nand_re_bufgp.O" CLOCK_DEDICATED_ROUTE = FALSE;
 NET "F_LVDS_CK_P1" CLOCK_DEDICATED_ROUTE = FALSE;
 
+# nand_we hacks...mostly for chipscope, can comment out if chipscope not used
+PIN "nand_we_bufgp.O" CLOCK_DEDICATED_ROUTE = FALSE;
+NET "F_LVDS_PB" CLOCK_DEDICATED_ROUTE = FALSE;
+
 NET "APOPTOSIS" LOC = K1;
 NET "APOPTOSIS" IOSTANDARD = LVCMOS33;
 
@@ -529,3 +533,4 @@ NET "F_LVDS_CK_P1" SLEW = SLOW;
 
 # NET "F_LVDS_CK_N[*]" IOSTANDARD = LVDS_33 | DIFF_TERM = TRUE;
 # NET "F_LVDS_CK_P[*]" IOSTANDARD = LVDS_33 | DIFF_TERM = TRUE;
+NET "nand_drive_out_nand_powered_on_AND_16_o_inv" KEEP = "TRUE";

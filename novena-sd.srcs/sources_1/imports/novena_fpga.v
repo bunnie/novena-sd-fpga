@@ -168,6 +168,8 @@ module novena_fpga(
    wire [6:0] 		      ddr3_p2_wr_count;
    wire 		      ddr3_p2_wr_underrun;
    wire 		      ddr3_p2_wr_error;
+   wire 		      ddr3_p2_wr_pulse;
+   wire 		      p2_wr_pulse_gate;
 
    wire 		      ddr3_p3_cmd_en; // to mcb
    wire [2:0] 		      ddr3_p3_cmd_instr;
@@ -183,6 +185,8 @@ module novena_fpga(
    wire [6:0] 		      ddr3_p3_rd_count;
    wire 		      ddr3_p3_rd_overflow;
    wire 		      ddr3_p3_rd_error;
+   wire 		      ddr3_p3_rd_pulse;
+   wire 		      p3_rd_pulse_gate;
    
    
    wire 		      reset;
@@ -251,21 +255,24 @@ module novena_fpga(
    wire 	      romulator_on;
    wire 	      nand_re, nand_re_ibufg;
    wire 	      nand_we, nand_we_ibufg;
+   wire 	      nand_powered_on;
 
+   wire 	      not_ax211; // used to override RB for AX211 use case
+   
    assign romulator_on = 1'b1;  // for now, jammed on; but later turn off for snooping modes
    
    assign nand_din = {F_DX0, F_DX3, F_DX2, F_DX11, F_LVDS_N11, F_DX1, F_LVDS_NC, F_LVDS_PC};
-   assign F_LVDS_PC  = (nand_drive_out & romulator_on) ? nand_dout[0] : 1'bZ;
-   assign F_LVDS_NC  = (nand_drive_out & romulator_on) ? nand_dout[1] : 1'bZ;
-   assign F_DX1      = (nand_drive_out & romulator_on) ? nand_dout[2] : 1'bZ;
-   assign F_LVDS_N11 = (nand_drive_out & romulator_on) ? nand_dout[3] : 1'bZ;
-   assign F_DX11     = (nand_drive_out & romulator_on) ? nand_dout[4] : 1'bZ;
-   assign F_DX2      = (nand_drive_out & romulator_on) ? nand_dout[5] : 1'bZ;
-   assign F_DX3      = (nand_drive_out & romulator_on) ? nand_dout[6] : 1'bZ;
-   assign F_DX0      = (nand_drive_out & romulator_on) ? nand_dout[7] : 1'bZ;
+   assign F_LVDS_PC  = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[0] : 1'bZ;
+   assign F_LVDS_NC  = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[1] : 1'bZ;
+   assign F_DX1      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[2] : 1'bZ;
+   assign F_LVDS_N11 = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[3] : 1'bZ;
+   assign F_DX11     = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[4] : 1'bZ;
+   assign F_DX2      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[5] : 1'bZ;
+   assign F_DX3      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[6] : 1'bZ;
+   assign F_DX0      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[7] : 1'bZ;
 
-   assign F_LVDS_N0  = romulator_on ? nand_rb : 1'bZ;
-
+   assign F_LVDS_N0  = romulator_on & nand_powered_on ? (nand_rb | !not_ax211) : 1'bZ;
+      
    // nand_re, nand_we are edge signals, so use a BUFG to distribute as clock
    IBUFG nand_we_ibufgp(.I(F_LVDS_PB), .O(nand_we_ibufg) );
    BUFG  nand_we_bufgp(.I(nand_we_ibufg), .O(nand_we) );
@@ -274,13 +281,19 @@ module novena_fpga(
    
    wire [7:0] 	      nand_uk_cmd;
    wire 	      nand_uk_updated;
-   
+   wire [7:0] 	      nand_known_cmd;
+   wire 	      nand_cmd_updated;
+   wire [29:0] 	      nand_adr;
+   wire 	      nand_adr_updated;
+   wire 	      nand_cs;
+   assign nand_cs = F_LVDS_P0;
+
    romulator romulator(
 		       .clk(bclk_dll),  // 133 MHz
 		       
 		       .nand_we(nand_we),
 		       .nand_re(nand_re),
-		       .nand_cs(F_LVDS_P0),
+		       .nand_cs(nand_cs),
 		       .nand_ale(F_LVDS_NB),
 		       .nand_cle(F_LVDS_P15),
 		       .nand_rb(nand_rb),
@@ -298,11 +311,90 @@ module novena_fpga(
 
 		       .nand_uk_cmd(nand_uk_cmd),
 		       .nand_uk_cmd_updated(nand_uk_updated),
+
+		       .nand_known_cmd(nand_known_cmd),
+		       .nand_cmd_updated(nand_cmd_updated),
+
+		       .nand_adr(nand_adr),
+		       .nand_adr_updated(nand_adr_updated),
 		       
 		       .reset(reset)
 		       );
    
 		       
+   ////////////////////////////////////
+   ///// address FIFO -- log what addresses are asked of the ROM
+   ////////////////////////////////////
+   wire nand_adr_updated_pulse;
+   reg 	nadr_up_d;
+   wire adrfifo_full, adrfifo_over, adrfifo_empty, adrfifo_rst;
+   wire adrfifo_rd_pulse;
+   wire [13:0] adrfifo_count;
+   wire [29:0]  adrfifo_data;
+   wire 	log_adr_end;
+   reg 		nand_cs_clean;
+   reg 		nand_adr_up_clean;
+   
+   always @(posedge bclk_dll) begin
+      // clean up and bring to clock domain before consuming
+      nand_cs_clean <= nand_cs;
+      nand_adr_up_clean <= nand_adr_updated;
+      
+      if( log_adr_end ) begin
+	 nadr_up_d <= nand_adr_up_clean & !nand_cs_clean;
+      end else begin
+	 nadr_up_d <= nand_adr_up_clean;
+      end
+   end
+   assign nand_adr_updated_pulse = log_adr_end ? (!nadr_up_d & (nand_adr_up_clean & !nand_cs_clean)) | 
+				   (nadr_up_d & !(nand_adr_up_clean & !nand_cs_clean)) :
+				   (!nadr_up_d & nand_adr_up_clean);
+   
+   nandadr_fifo nandadr_fifo(
+		   .rst(adrfifo_rst),
+		   .wr_clk(bclk_dll),
+		   .rd_clk(bclk_dll),
+		   .din(nand_adr[29:0]),
+		   .wr_en(nand_adr_updated_pulse),
+		   .rd_en(adrfifo_rd_pulse),
+		   .dout(adrfifo_data[29:0]),
+		   .full(adrfifo_full),
+		   .overflow(adrfifo_over),
+		   .empty(adrfifo_empty),
+		   .rd_data_count(adrfifo_count[13:0])
+		   );
+
+
+   ////////////////////////////////////
+   ///// known romulator commands FIFO -- log what commands were asked of me
+   ////////////////////////////////////
+   wire nand_cmd_updated_pulse;
+   reg 	ncmd_up_d;
+   wire cmdfifo_full, cmdfifo_over, cmdfifo_empty, cmdfifo_rst;
+   wire cmdfifo_rd_pulse;
+   wire [11:0] cmdfifo_count;
+   wire [7:0]  cmdfifo_data;
+   
+   always @(posedge bclk_dll) begin
+      ncmd_up_d <= nand_cmd_updated;
+   end
+   assign nand_cmd_updated_pulse = !ncmd_up_d && nand_cmd_updated;
+   
+   uk_fifo cmd_fifo(
+		   .rst(cmdfifo_rst),
+		   .wr_clk(bclk_dll),
+		   .rd_clk(bclk_dll),
+		   .din(nand_known_cmd[7:0]),
+		   .wr_en(nand_cmd_updated_pulse),
+		   .rd_en(cmdfifo_rd_pulse),
+		   .dout(cmdfifo_data[7:0]),
+		   .full(cmdfifo_full),
+		   .overflow(cmdfifo_over),
+		   .empty(cmdfifo_empty),
+		   .rd_data_count(cmdfifo_count[11:0])
+		   );
+      
+
    ////////////////////////////////////
    ///// Unknown romulator commands FIFO -- track errors and what we left on the floor
    ////////////////////////////////////
@@ -342,12 +434,12 @@ module novena_fpga(
    assign gpioA_din[4] = F_LVDS_N4; // clk, sclk
    assign gpioA_din[5] = F_LVDS_P1; // cmd, di
 
-   assign F_LVDS_P4 = gpioA_dir[0] ? gpioA_dout[0] : 1'bZ;
-   assign F_DX14    = gpioA_dir[1] ? gpioA_dout[1] : 1'bZ;
-   assign F_LVDS_N2 = gpioA_dir[2] ? gpioA_dout[2] : 1'bZ;
-   assign F_LVDS_N1 = gpioA_dir[3] ? gpioA_dout[3] : 1'bZ;
-   assign F_LVDS_N4 = gpioA_dir[4] ? gpioA_dout[4] : 1'bZ;
-   assign F_LVDS_P1 = gpioA_dir[5] ? gpioA_dout[5] : 1'bZ;
+   assign F_LVDS_P4 = gpioA_dir[0] & nand_powered_on ? gpioA_dout[0] : 1'bZ;
+   assign F_DX14    = gpioA_dir[1] & nand_powered_on ? gpioA_dout[1] : 1'bZ;
+   assign F_LVDS_N2 = gpioA_dir[2] & nand_powered_on ? gpioA_dout[2] : 1'bZ;
+   assign F_LVDS_N1 = gpioA_dir[3] & nand_powered_on ? gpioA_dout[3] : 1'bZ;
+   assign F_LVDS_N4 = gpioA_dir[4] & nand_powered_on ? gpioA_dout[4] : 1'bZ;
+   assign F_LVDS_P1 = gpioA_dir[5] & nand_powered_on ? gpioA_dout[5] : 1'bZ;
    
 
    ////////////////////////////////////
@@ -390,6 +482,7 @@ module novena_fpga(
 			 .reg_d( r40002wo[15:0] ) );
 
    ///// GPIO registers
+   ///// NOTE: GPIOA is also gated by nand_powered_on in this application!!!!
    reg_wo reg_wo_40010 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40010),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( gpioA_dout[15:0] ) );
@@ -400,9 +493,10 @@ module novena_fpga(
 			 
    // write control for p2
    // check alignment of verilog when port specs are too short
+   wire [1:0]  dummy_40020;
    reg_wo reg_wo_40020 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40020),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
-			 .reg_d( {ddr3_p2_cmd_bl[5:0], 
+			 .reg_d( {p2_wr_pulse_gate, dummy_40020[1:0], ddr3_p2_cmd_bl[5:0], 
 				  ddr3_p2_cmd_en, ddr3_p2_cmd_instr[2:0] } ) );
 
    reg_wo reg_wo_40022 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40022),
@@ -425,10 +519,16 @@ module novena_fpga(
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_wr_data[31:16] ) );
    
+   reg_r_det reg_det_4102A (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4002A),
+			 .ena(!cs0_r && !rw_r),
+			 .pulse( ddr3_p2_wr_pulse ) );
+   
    // read control for p3
+   wire [1:0]     dummy_40030;
+   
    reg_wo reg_wo_40030 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40030),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
-			 .reg_d( {ddr3_p3_cmd_bl[5:0], 
+			 .reg_d( {p3_rd_pulse_gate, dummy_40030[1:0], ddr3_p3_cmd_bl[5:0], 
 				  ddr3_p3_cmd_en, ddr3_p3_cmd_instr[2:0] } ) );
 
    reg_wo reg_wo_40032 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40032),
@@ -446,10 +546,20 @@ module novena_fpga(
 			 .reg_d( {ddr3_p3_rd_en, ddr3_p3_dummy[3:0]} ) );
 
    // write control for romulator
-   wire 	     rom_dummy;
+   // adrfifo_rst  resets the address fifo
+   // not_ax211    enables r/b signal if set, disables if clear
+   // cmdfifo_rst  resets the command fifo
+   // ukfifo_rst   resets the unknown commands fifo
+   // log_adr_end  enables address termination logging when set
    reg_wo reg_wo_40100 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40100),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
-			 .reg_d( {ukfifo_rst, rom_dummy} ) );
+			 .reg_d( {adrfifo_rst, not_ax211, cmdfifo_rst, ukfifo_rst, log_adr_end} ) );
+
+
+   // nand_powered_on => when 1, outputs are engaged; if 0, all outputs are off
+   reg_wo reg_wo_40102 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40102),
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
+			 .reg_d( {nand_powered_on} ) );
 
 			 
    //////// read-only registers
@@ -501,27 +611,56 @@ module novena_fpga(
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( ddr3_p3_rd_data[31:16] ) );
 
+   reg_r_det reg_det_41034 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41034),
+			 .ena(!cs0_r && rw_r),
+			 .pulse( ddr3_p3_rd_pulse ) );
+   
    // read status & data for romulator
    reg_ro reg_ro_41100 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41100),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {8'b0, ukfifo_data[7:0]} ) );
 
-   ///// **** validation note: it's possible for pulse to false-trigger if bus_addr glitches to my_a
-   ///// **** so keep a look out for that from the ukfifo_count and make sure it's monotonically decreasing
-   ///// **** as part of validation
    reg_r_det reg_det_41100 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41100),
 			 .ena(!cs0_r && rw_r),
 			 .pulse( ukfifo_rd_pulse ) );
 				
    reg_ro reg_ro_41102 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41102),
-			 .re(!cs0_r && rw_r),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {1'b0, ukfifo_full, ukfifo_over, ukfifo_empty, ukfifo_count[11:0]} ) );
+
+   reg_ro reg_ro_41104 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41104),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {8'b0, cmdfifo_data[7:0]} ) );
+
+   reg_r_det reg_det_41104 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41104),
+			 .ena(!cs0_r && rw_r),
+			 .pulse( cmdfifo_rd_pulse ) );
+				
+   reg_ro reg_ro_41106 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41106),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {1'b0, cmdfifo_full, cmdfifo_over, cmdfifo_empty, cmdfifo_count[11:0]} ) );
+
+   reg_ro reg_ro_41108 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41108),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {adrfifo_full, adrfifo_empty, adrfifo_count[13:0]} ) );
+
+   reg_ro reg_ro_4110A ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110A),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {adrfifo_data[15:0]} ) );
+
+   reg_ro reg_ro_4110C ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110C),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {2'b0,adrfifo_data[29:16]} ) );
+
+   reg_r_det reg_det_4110C (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110C),
+			 .ena(!cs0_r && rw_r),
+			 .pulse( adrfifo_rd_pulse ) );
    
    
    // FPGA minor version code
    reg_ro reg_ro_41FFC ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFC),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
-			 .reg_d( 16'h0003 ) );
+			 .reg_d( 16'h0008 ) );
 
    // FPGA major version code
    reg_ro reg_ro_41FFE ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFE),
@@ -542,6 +681,29 @@ module novena_fpga(
    // Minor version 0003, May 27 2013
    //    fix various bugs to DDR3 memory interface; add level-to-pulse converters on enables
    //////
+   // Minor version 0004, May 29 2013
+   //    add romulator (initial version) to design
+   //////
+   // Minor version 0005, May 29 2013
+   //    add nand_powered_on (reg 040102, bit 0)
+   //    add known_command feedback
+   //////
+   // Minor version 0006, May 30 2013
+   //    romulator seems to be mostly working now. this version maps all address accesses
+   //    above 0x80000 to RAM addresses 0x8000 in a looping fashion. It also assumes
+   //    the presence of ECC data inside the RAM data.
+   //    Also added the option to log when addresses terminate (so adr_fifo entries are in start-end pairs)
+   //////
+   // Minor version 0007, May 30 2013
+   //    increased FIFO depth of address log to 16384 from 4096, changed bitfields of status register
+   //    accordingly
+   //////
+   // Minor version 0008, Jun  1 2013
+   //    added auto-increment pulse & pulse gate bits to DDR3 interface
+   //    modified DDR3 core to have two additional 64-bit read/write ports for LA function
+   //////
+   
+   
    
    // mux between block memory and register set based on high bits
    assign eim_dout = (bus_addr[18:16] != 3'b000) ? ro_d : bram_dout;
@@ -601,7 +763,7 @@ module novena_fpga(
    rising_edge p2rdp2e( .clk(bclk_dll), .level(ddr3_p3_rd_en), .pulse(p3_rd_en_pulse) );
    
    
-   ddr3_if # (
+   ddr3_if_4port # (
 	      .C1_P0_MASK_SIZE(4),
 	      .C1_P0_DATA_PORT_SIZE(32),
 	      .C1_P1_MASK_SIZE(4),
@@ -611,7 +773,7 @@ module novena_fpga(
 	      .C1_CALIB_SOFT_IP("TRUE"),
 	      .C1_SIMULATION("FALSE"),
 	      .C1_RST_ACT_LOW(0),
-	      .C1_INPUT_CLK_TYPE("DIFFERENTIAL"),
+	      .C1_INPUT_CLK_TYPE("SINGLE_ENDED"),
 	      .C1_MEM_ADDR_ORDER("ROW_BANK_COLUMN"),
 	      .C1_NUM_DQ_PINS(16),
 	      .C1_MEM_ADDR_WIDTH(14),
@@ -656,7 +818,8 @@ module novena_fpga(
 	      .c1_p2_cmd_empty                        (ddr3_p2_cmd_empty),
 	      .c1_p2_cmd_full                         (ddr3_p2_cmd_full),
 	      .c1_p2_wr_clk                           (bclk_dll),
-	      .c1_p2_wr_en                            (p2_wr_en_pulse),
+	      .c1_p2_wr_en                            (p2_wr_en_pulse || 
+						       (ddr3_p2_wr_pulse & p2_wr_pulse_gate)),
 	      .c1_p2_wr_mask                          (ddr3_p2_wr_mask),
 	      .c1_p2_wr_data                          (ddr3_p2_wr_data),
 	      .c1_p2_wr_full                          (ddr3_p2_wr_full),
@@ -672,7 +835,8 @@ module novena_fpga(
 	      .c1_p3_cmd_empty                        (ddr3_p3_cmd_empty),
 	      .c1_p3_cmd_full                         (ddr3_p3_cmd_full),
 	      .c1_p3_rd_clk                           (bclk_dll),
-	      .c1_p3_rd_en                            (p3_rd_en_pulse),
+	      .c1_p3_rd_en                            (p3_rd_en_pulse || 
+						       (ddr3_p3_rd_pulse & p3_rd_pulse_gate)),
 	      .c1_p3_rd_data                          (ddr3_p3_rd_data),
 	      .c1_p3_rd_full                          (ddr3_p3_rd_full),
 	      .c1_p3_rd_empty                         (ddr3_p3_rd_empty),

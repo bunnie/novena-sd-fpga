@@ -17,6 +17,40 @@
 // under the License.
 //////////////////////////////////////////////////////////////////////////////
 
+///////////
+// AX211 ROM format
+// 0x00000 - 0x1FFFF  copy #1 of firmware
+//  0x0000 -  0x7FFF   actual code
+//  0x8000 - 0x1FFFF   blank space
+//
+// 0x20000 - 0x3FFFF  copy #2 of firmware
+// 0x40000 - 0x5FFFF  copy #3 of firmware
+// 0x60000 - 0x7FFFF  copy #4 of firmware
+//
+// 0x80000 - 0x80FFF  firmware sig #1
+// 0xA0000 - 0xA0FFF  firmware sig #2
+// 0xC0000 - 0xC0FFF  firmware sig #3
+// 0xE0000 - 0xE0FFF  firmware sig #4
+//
+// 0x100000 - 0x108000 MBR 
+//    0x101100 - 0x101200  MBR region
+// 0x140800 - 0x142000 signature "SD         " + some sort of offset table
+//    two copies: copy #1 at 140A00, copy #2 at 141200
+//
+// 0x200000 - 0x400000 each erase block (+0x20000) offset there is an allocation table
+//    current theory is this is an implementation-specific version of FAT16
+// 
+// 0x400000 onwards is disk data
+//
+// every erase block (0x20000), there is a redundant block header
+//   located at offsets 0x200, 0x410, and 0x620. coding is unknown but seems to be block # + ECC
+
+////// layout in RAM
+// 0x0000 - 0x7FFF  firmware copy
+// 0x8000 - 0x8FFF  signature copy
+// 0x9000 - 0xFFFF  MBR + FAT copy
+// all other reports as 0xFF
+
 module romulator(
 		 input wire clk,
 
@@ -41,6 +75,12 @@ module romulator(
 		 output wire [7:0] nand_uk_cmd,    // pipe to a FIFO to store unknown commands
 		 output reg nand_uk_cmd_updated,
 
+		 output wire [7:0] nand_known_cmd,
+		 output wire nand_cmd_updated,
+
+		 output wire [29:0] nand_adr,
+		 output wire nand_adr_updated,
+
 		 input wire reset
 
 		 );
@@ -48,10 +88,81 @@ module romulator(
    wire 	       local_reset;
    sync_reset nand_res_sync( .glbl_reset(reset), .clk(clk), .reset(local_reset) );
 
+   reg [11:0] col_adr_r;
+   reg [17:0] row_adr_r;
+   ///// wire to lookup ram
    assign ram_clk_to_ram = clk;
-   assign ram_adr[15:0] = (row_adr_r[4:0] * 12'd2112) + col_adr_r;
    assign ram_d_to_ram = 8'b0; // doesn't matter for now, write is disabled
    assign ram_we = 1'b0;
+   assign nand_adr = {row_adr_r, col_adr_r};
+
+`ifdef NOECC_IN_ROM
+   reg 	      ram_blank;
+   reg 	      ram_adrr;  // registered version of ram_adr
+   
+   always @(row_adr_r or col_adr_r) begin
+      if( col_adr_r[11] == 1'b1 ) begin  // OOB data is blank
+	 ram_blank = 1'b1;
+	 ram_adrr[15:0] = {1'b0, row_adr_r[2:0],col_adr_r[11:0]}; // actually a don't care
+      end else begin
+	 if( {row_adr_r,col_adr_r[10:0]} < 28'h80000 ) begin
+	    ram_adrr[15:0] = {1'b0, row_adr_r[3:0],col_adr_r[10:0]};
+	    ram_blank = row_adr_r[4];
+	 end else if( ({row_adr_r,col_adr_r[10:0]} >= 28'h80000) && 
+		      ({row_adr_r,col_adr_r[10:0]} < 28'h100000) ) begin
+	    ram_adrr[15:0] = {4'b1000,row_adr_r[0],col_adr_r[10:0]};
+	    // 81000-9ffff
+	    // a1000-bffff
+	    // c1000-dffff
+	    // e1000-fffff
+
+	    // 81-9f -- 80
+	    // a1-bf -- a0
+	    // c1-df -- c0
+	    // e1-ff -- e0
+	    ram_blank = !((row_adr_r[8:1] == 8'h80) || (row_adr_r[8:1] == 8'ha0) ||
+			(row_adr_r[8:1] == 8'hc0) || (row_adr_r[8:1] == 8'he0));
+	 end else if( ({row_adr_r,col_adr_r[10:0]} >= 28'h100000) && 
+		      ({row_adr_r,col_adr_r[10:0]} <  28'h107000) ) begin
+	    ram_adrr[15:0] = {4'b1001,row_adr_r[0],col_adr_r[10:0]};
+	    ram_blank = row_adr_r[8:5] > 4'h7;
+	 end else begin
+	    ram_blank = 1'b1;
+	    ram_adrr[15:0] = {1'b0, row_adr_r[2:0],col_adr_r[11:0]}; // actually a don't care
+	 end
+      end // else: !if( col_adr_r[11] == 1'b1 )
+   end // always @ (row_adr_r or col_adr_r)
+
+   assign ram_adr = ram_adrr;
+`else // !`ifdef NOECC_IN_ROM
+   // this path assumes embedded ECC in RAM image
+   reg ram_blank;
+   reg [15:0] ram_adrr;
+   wire [15:0] adr_with_ecc;
+
+   assign adr_with_ecc[15:0] = (row_adr_r[4:0] * 12'd2112) + col_adr_r;
+   
+   always @(row_adr_r or col_adr_r) begin
+      if( {row_adr_r,col_adr_r[10:0]} < 28'h80000 ) begin
+	 ram_adrr[15:0] = adr_with_ecc[15:0];
+	 ram_blank = 1'b0;
+	 // 'b' rev binary puts the firmware signature at 0x8000 in binary
+//      end else if( ({row_adr_r,col_adr_r[10:0]} >= 28'h80000) &&
+//		   ({row_adr_r,col_adr_r[10:0]} < 28'h100000) ) begin
+	 // 'c' rev binary puts the MBR region at 0x8000 in binary
+//      end else if( ({row_adr_r,col_adr_r[10:0]} >= 28'h100000) &&
+//		   ({row_adr_r,col_adr_r[10:0]} < 28'h200000) ) begin
+//	 ram_adrr[15:0] = {1'b1,adr_with_ecc[14:0]};
+//	 ram_blank = 1'b0;
+      end else begin
+	 ram_adrr[15:0] = {1'b1,adr_with_ecc[14:0]};
+	 ram_blank = 1'b1;
+      end
+   end
+
+   assign ram_adr = ram_adrr;
+`endif
+   
    
    ////// commands to implement:
    //  00 / 30 read
@@ -63,19 +174,19 @@ module romulator(
    //  all other commands should be noted as unprocessable via status register
    //   (keep a small FIFO of unusable commands for debug purposes)
    
-   parameter NAND_IDLE     = 9'b1 << 0;
-   parameter NAND_ID0      = 9'b1 << 1;
-   parameter NAND_READ0    = 9'b1 << 2;
-   parameter NAND_READ_GO  = 9'b1 << 3;
-   parameter NAND_RESET    = 9'b1 << 4;
-   parameter NAND_DOUT0    = 9'b1 << 5;
-   parameter NAND_STAT0    = 9'b1 << 6;
-   parameter NAND_UNKNOWN0 = 9'b1 << 7;
-   parameter NAND_ID1      = 9'b1 << 8;
+   parameter NAND_IDLE     = 10'b1 << 0;
+   parameter NAND_ID0      = 10'b1 << 1;
+   parameter NAND_READ0    = 10'b1 << 2;
+   parameter NAND_READ_GO  = 10'b1 << 3;
+   parameter NAND_RESET    = 10'b1 << 4;
+   parameter NAND_DOUT0    = 10'b1 << 5;
+   parameter NAND_STAT0    = 10'b1 << 6;
+   parameter NAND_UNKNOWN0 = 10'b1 << 7;
+   parameter NAND_ID1      = 10'b1 << 8;
    
    // don't forget to change bit widths of nSTATES and above '1' constant if you add a state
 
-   parameter NAND_nSTATES = 9;
+   parameter NAND_nSTATES = 10;
    reg [(NAND_nSTATES - 1):0] 		 cstate;
    reg [(NAND_nSTATES - 1):0] 		 nstate;
 
@@ -89,10 +200,15 @@ module romulator(
    parameter CMD_STATUS  = 8'h70;
 
    reg 					 readybusy_w; // these signals trigger an async timer
-   wire					 readybusy_r;
+   reg					 readybusy_r;
    
    reg [7:0] 				 unknown_command;
+   reg [7:0] 				 known_command;
+   
    assign nand_uk_cmd = unknown_command;
+   assign nand_known_cmd = known_command;
+   // capture on falling edge of nand_we when nand_cle active
+   assign nand_cmd_updated = !(nand_cle & !nand_we); 
 
    always @(posedge nand_we or posedge local_reset) begin
       if(local_reset) begin
@@ -106,32 +222,50 @@ module romulator(
       if(!nand_cs && nand_cle && !nand_ale) begin
 	 // CLE cycles always reset nstate
 	 if( nand_din == CMD_ID ) begin // done
+	    readybusy_r <= 1'b0;
 	    nstate <= NAND_ID0;
 	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
 	 end else if( nand_din == CMD_READ ) begin // done
+	    readybusy_r <= 1'b0;
 	    nstate <= NAND_READ0;
 	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
 	 end else if( nand_din == CMD_READ_GO ) begin // done
+	    readybusy_r <= 1'b1;
 	    nstate <= NAND_READ_GO;
 	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
 	 end else if( nand_din == CMD_RESET ) begin // done
+	    readybusy_r <= 1'b0;
 	    nstate <= NAND_RESET;
 	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
 	 end else if( nand_din == CMD_DATAOUT ) begin // done
+	    readybusy_r <= 1'b0;
 	    nstate <= NAND_DOUT0;
 	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
 	 end else if( nand_din == CMD_DATA_GO ) begin // done
+	    readybusy_r <= 1'b1;
 	    nstate <= NAND_READ_GO; // note same state as follows CMD_READ_GO
 	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
 	 end else if( nand_din == CMD_STATUS ) begin // done
+	    readybusy_r <= 1'b0;
 	    nstate <= NAND_STAT0;
 	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
 	 end else begin
+	    readybusy_r <= 1'b0;
 	    nstate <= NAND_UNKNOWN0; // done
 	    unknown_command <= nand_din;
+	    known_command <= nand_din;
 	 end
       end else begin // if (!nand_cs && nand_cle && !nand_ale)
+	 readybusy_r <= 1'b0;
 	 unknown_command <= unknown_command;
+	 known_command <= known_command;
 	 // if not a CLE cycle, decode based upon current state
 	 case (cstate)
 	   NAND_IDLE: begin
@@ -219,10 +353,10 @@ module romulator(
 		 row_adr[7:0] <= nand_din[7:0];
 	      end else if( wr_cyc == 3'h3 ) begin
 		 wr_cyc <= wr_cyc + 3'h1;
-		 row_adr[15:0] <= nand_din[7:0];
+		 row_adr[15:8] <= nand_din[7:0];
 	      end else if( wr_cyc == 3'h4 ) begin
 		 wr_cyc <= wr_cyc + 3'h1;
-		 row_adr[17:0] <= nand_din[1:0];
+		 row_adr[17:16] <= nand_din[1:0];
 	      end else begin
 		 wr_cyc <= wr_cyc;
 	      end
@@ -242,13 +376,12 @@ module romulator(
 	   end // case: NAND_DOUT0
 	   NAND_READ_GO: begin
 	      nand_uk_cmd_updated <= 1'b0;
-	      readybusy_w <= 1'b1;
+	      readybusy_w <= 1'b0;
 	      wr_cyc <= 3'b0;
 	   end
 	   default: begin
 	      // NAND_ID1 is a nop
 	      // NAND_STAT0 is a nop
-	      // NAND_READ_GO is a nop
 	      nand_uk_cmd_updated <= 1'b0;
 	      readybusy_w <= 1'b0;
 	      wr_cyc <= 3'b0;
@@ -261,8 +394,6 @@ module romulator(
    reg [7:0] special_data;
    reg 	     special_en;
    reg 	     data_en;
-   reg [11:0] col_adr_r;
-   reg [17:0] row_adr_r;
    
    // read-cycle actions
    
@@ -276,14 +407,17 @@ module romulator(
 //   IBUF  nand_re_loopback( .I(nand_re_dummy), .O(nand_re_sig) );
    
 //   assign nand_drive_out = !nand_re_sig && !nand_cs;
-   assign nand_drive_out = nand_re && !nand_cs;
-   assign nand_dout = special_en ? special_data[7:0] : ram_d_from_ram[7:0];
-   
-   always @(negedge nand_re or posedge nand_cle or posedge local_reset) begin
+   assign nand_drive_out = !nand_re && !nand_cs;
+   assign nand_dout = special_en ? special_data[7:0] : (ram_blank ? 8'hff : ram_d_from_ram[7:0]);
+
+   reg 	      first_read; // delay incremeting address after the first read falling edge
+   assign nand_adr_updated = !first_read; // latch address on rising edge of adr_updated
+      always @(negedge nand_re or posedge nand_cle or posedge local_reset) begin
       if( nand_cle || local_reset ) begin
 	 rd_cycle <= 4'b0;
 	 special_data <= 8'b0;
 	 special_en <= 1'b0;
+	 first_read <= 1'b1;
 	 // asynchronously copy over col/row adr when cle is set, or if in reset....
 	 col_adr_r <= col_adr;
 	 row_adr_r <= row_adr;
@@ -291,6 +425,7 @@ module romulator(
 	 row_adr_r <= row_adr_r;
 	 case (cstate)
 	   NAND_ID1: begin
+	      first_read <= first_read;
 	      col_adr_r <= col_adr_r;
 	      if( rd_cycle == 4'h0 ) begin
 		 special_data <= 8'hEC;
@@ -319,18 +454,22 @@ module romulator(
 	      end
 	   end // case: NAND_ID1
 	   NAND_STAT0: begin
+	      first_read <= first_read;
 	      col_adr_r <= col_adr_r;
 	      special_en <= 1'b1;
 	      special_data <= 8'b01000000; // not protected, ready, and always pass
 	   end
 	   NAND_READ_GO: begin
-	      if( col_adr_r < 12'd2112 ) begin
+	      if( first_read ) begin
+		 first_read <= 1'b0;
+	      end else if( col_adr_r < 12'd2112 ) begin
 		 col_adr_r <= col_adr_r + 12'b1; // increment the column address
 	      end else begin 
 		 col_adr_r <= 12'd0;  // wrap column address around to 0 if over-read
 	      end
 	   end
 	   default: begin
+	      first_read <= 1'b1;
 	      col_adr_r <= col_adr_r;
 	      rd_cycle <= 4'b0;
 	      special_data <= 8'hFF;
@@ -345,7 +484,6 @@ module romulator(
    reg [12:0] rb_timer;
    reg 	     rb_counting;
    
-   assign readybusy_r = 1'b0; // not used for now
    /////// generate an R/B count based on asynchronous pulse input
    always @(posedge clk) begin
       rb_w1 <= readybusy_w;
@@ -366,14 +504,14 @@ module romulator(
 	 rb_r_pulse <= 1'b0;
       end
 
-      if( local_reset || nand_cle ) begin
+      if( local_reset ) begin
 	 rb_timer <= 12'b0;
 	 rb_counting <= 1'b0;
       end else begin
 	 if( (rb_r_pulse || rb_w_pulse) && (rb_timer == 12'b0) ) begin
 	    rb_timer <= rb_timer + 12'b1;
 	    rb_counting <= 1'b1;
-	 end else if( rb_timer == 12'h600 ) begin  // about 5us @ 133 MHz clock
+	 end else if( rb_timer == 12'h200 ) begin  // about 1.5us @ 133 MHz clock
 	    rb_timer <= 12'h0;
 	    rb_counting <= 1'b0;
 	 end else if( rb_counting == 1'b1 ) begin
@@ -385,6 +523,6 @@ module romulator(
 	 end
       end // else: !if( local_reset or nand_cle )
    end
-   assign nand_rb = !rb_counting;
+   assign nand_rb = !rb_counting || (rb_timer < 12'h4);
       
 endmodule // romulator

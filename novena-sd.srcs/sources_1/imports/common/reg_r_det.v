@@ -3,7 +3,7 @@ module reg_r_det(
 	      input wire [18:0] bus_a,
 	      input wire [18:0] my_a,
 	      input wire ena,
-	      output wire pulse
+	      output reg pulse
 
 	      );
 
@@ -20,9 +20,8 @@ module reg_r_det(
 
    always @(posedge clk) begin
       gotread_d <= gotread;
+      pulse <= !gotread_d && gotread;
    end
-
-   assign pulse = !gotread_d && gotread;
 
 endmodule // reg_r_det
 
