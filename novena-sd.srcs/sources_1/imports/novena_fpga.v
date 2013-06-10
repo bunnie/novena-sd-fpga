@@ -224,6 +224,12 @@ module novena_fpga(
    wire 	      ram_we;
    wire 	      ram_clk_to_ram;
 
+   // tie down unused bits in the DDR3 romulator implementation
+   assign ram_clk_to_ram = bclk_dll;
+   assign ram_adr = 16'b0;
+   assign ram_d_to_ram = 8'b0;
+   assign ram_we = 1'b0;
+   
    novena_eim novena_eim (
 			  .din(eim_din),
 			  .dout(bram_dout),
@@ -257,7 +263,7 @@ module novena_fpga(
    wire 	      nand_we, nand_we_ibufg;
    wire 	      nand_powered_on;
 
-   wire 	      not_ax211; // used to override RB for AX211 use case
+   wire 	      bypass_rb; // used to override RB for AX211 use case
    
    assign romulator_on = 1'b1;  // for now, jammed on; but later turn off for snooping modes
    
@@ -271,7 +277,7 @@ module novena_fpga(
    assign F_DX3      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[6] : 1'bZ;
    assign F_DX0      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[7] : 1'bZ;
 
-   assign F_LVDS_N0  = romulator_on & nand_powered_on ? (nand_rb | !not_ax211) : 1'bZ;
+   assign F_LVDS_N0  = romulator_on & nand_powered_on ? (nand_rb | bypass_rb) : 1'bZ;
       
    // nand_re, nand_we are edge signals, so use a BUFG to distribute as clock
    IBUFG nand_we_ibufgp(.I(F_LVDS_PB), .O(nand_we_ibufg) );
@@ -288,39 +294,108 @@ module novena_fpga(
    wire 	      nand_cs;
    assign nand_cs = F_LVDS_P0;
 
-   romulator romulator(
-		       .clk(bclk_dll),  // 133 MHz
+   wire 	      rom_ddr3_reset;
+   wire 	      page_addra_over;
+   wire 	      outstanding_under;
+   
+   wire 	      ddr3_wr_clk;
+   wire 	      ddr3_wr_cmd_en;
+   wire [2:0] 	      ddr3_wr_cmd_instr;
+   wire [5:0] 	      ddr3_wr_cmd_bl;
+   wire [29:0] 	      ddr3_wr_adr;
+   wire 	      ddr3_wr_cmd_full;
+   wire 	      ddr3_wr_dat_en;
+   wire [31:0] 	      ddr3_wr_dat;
+   wire 	      ddr3_wr_full;
+		      
+   wire 	      ddr3_rd_clk;
+   wire 	      ddr3_rd_cmd_en;
+   wire [2:0] 	      ddr3_rd_cmd_instr;
+   wire [5:0] 	      ddr3_rd_cmd_bl;
+   wire [29:0] 	      ddr3_rd_adr;
+   wire 	      ddr3_rd_cmd_full;
+   wire 	      ddr3_rd_dat_en;
+   wire [31:0] 	      ddr3_rd_dat;
+   wire 	      ddr3_rd_dat_empty;
+   wire [6:0] 	      ddr3_rd_dat_count;
+   wire 	      ddr3_rd_dat_full;
+   wire 	      ddr3_rd_dat_overflow; // need to monitor this
+
+   romulator_ddr3 romulator_ddr3(
+				 .clk(bclk_dll),  // 133 MHz
 		       
-		       .nand_we(nand_we),
-		       .nand_re(nand_re),
-		       .nand_cs(nand_cs),
-		       .nand_ale(F_LVDS_NB),
-		       .nand_cle(F_LVDS_P15),
-		       .nand_rb(nand_rb),
-		       .nand_wp(F_DX17),
+				 .nand_we(nand_we),
+				 .nand_re(nand_re),
+				 .nand_cs(nand_cs),
+				 .nand_ale(F_LVDS_NB),
+				 .nand_cle(F_LVDS_P15),
+				 .nand_rb(nand_rb),
+				 .nand_wp(F_DX17),
 
-		       .nand_din(nand_din),
-		       .nand_dout(nand_dout),
-		       .nand_drive_out(nand_drive_out),
+				 .nand_din(nand_din),
+				 .nand_dout(nand_dout),
+				 .nand_drive_out(nand_drive_out),
 
-		       .ram_adr(ram_adr),
-		       .ram_d_to_ram(ram_d_to_ram),
-		       .ram_d_from_ram(ram_d_from_ram),
-		       .ram_we(ram_we),
-		       .ram_clk_to_ram(ram_clk_to_ram),
+				 .rom_ddr3_reset(rom_ddr3_reset),
+		      
+				 .ddr3_wr_clk(ddr3_wr_clk),
+				 .ddr3_wr_cmd_en(ddr3_wr_cmd_en),
+				 .ddr3_wr_cmd_instr(ddr3_wr_cmd_instr[2:0]),
+				 .ddr3_wr_cmd_bl(ddr3_wr_cmd_bl[5:0]),
+				 .ddr3_wr_adr(ddr3_wr_adr[29:0]),
+				 .ddr3_wr_cmd_full(ddr3_wr_cmd_full),
+				 .ddr3_wr_dat_en(ddr3_wr_dat_en),
+				 .ddr3_wr_dat(ddr3_wr_dat[31:0]),
+				 .ddr3_wr_full(ddr3_wr_full),
+		      
+				 .ddr3_rd_clk(ddr3_rd_clk),
+				 .ddr3_rd_cmd_en(ddr3_rd_cmd_en),
+				 .ddr3_rd_cmd_instr(ddr3_rd_cmd_instr[2:0]),
+				 .ddr3_rd_cmd_bl(ddr3_rd_cmd_bl[5:0]),
+				 .ddr3_rd_adr(ddr3_rd_adr[29:0]),
+				 .ddr3_rd_cmd_full(ddr3_rd_cmd_full),
+				 .ddr3_rd_dat_en(ddr3_rd_dat_en),
+				 .ddr3_rd_dat(ddr3_rd_dat[31:0]),
+				 .ddr3_rd_dat_empty(ddr3_rd_dat_empty),
+				 .ddr3_rd_dat_count(ddr3_rd_dat_count[6:0]),
+				 .ddr3_rd_dat_full(ddr3_rd_dat_full),
+				 .ddr3_rd_dat_overflow(ddr3_rd_dat_overflow),
 
-		       .nand_uk_cmd(nand_uk_cmd),
-		       .nand_uk_cmd_updated(nand_uk_updated),
+				 .page_addra_over(page_addra_over),
+				 .outstanding_under(outstanding_under),
 
-		       .nand_known_cmd(nand_known_cmd),
-		       .nand_cmd_updated(nand_cmd_updated),
+				 .nand_uk_cmd(nand_uk_cmd),
+				 .nand_uk_cmd_updated(nand_uk_updated),
+				 
+				 .nand_known_cmd(nand_known_cmd),
+				 .nand_cmd_updated(nand_cmd_updated),
 
-		       .nand_adr(nand_adr),
-		       .nand_adr_updated(nand_adr_updated),
+				 .nand_adr(nand_adr),
+				 .nand_adr_updated(nand_adr_updated),
 		       
-		       .reset(reset)
+				 .reset(reset)
 		       );
    
+   reg 		      page_addra_over_caught;
+   reg 		      outstanding_under_caught;
+   always @(posedge bclk_dll) begin
+      if(rom_ddr3_reset) begin
+	 page_addra_over_caught <= 1'b0;
+	 outstanding_under_caught <= 1'b0;
+      end else begin
+	 if( page_addra_over ) begin
+	    page_addra_over_caught <= 1'b1;
+	 end else begin
+	    page_addra_over_caught <= page_addra_over_caught;
+	 end
+
+	 if( outstanding_under ) begin
+	    outstanding_under_caught <= 1'b1;
+	 end else begin
+	    outstanding_under_caught <= outstanding_under_caught;
+	 end
+      end // else: !if(rom_ddr3_reset)
+   end // always @ (posedge bclk_dll)
 		       
    ////////////////////////////////////
    ///// address FIFO -- log what addresses are asked of the ROM
@@ -547,13 +622,14 @@ module novena_fpga(
 
    // write control for romulator
    // adrfifo_rst  resets the address fifo
-   // not_ax211    enables r/b signal if set, disables if clear
+   // bypass_rb    enables r/b signal if set, disables if clear
    // cmdfifo_rst  resets the command fifo
    // ukfifo_rst   resets the unknown commands fifo
    // log_adr_end  enables address termination logging when set
    reg_wo reg_wo_40100 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40100),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
-			 .reg_d( {adrfifo_rst, not_ax211, cmdfifo_rst, ukfifo_rst, log_adr_end} ) );
+			 .reg_d( {rom_ddr3_reset, adrfifo_rst, 
+				  bypass_rb, cmdfifo_rst, ukfifo_rst, log_adr_end} ) );
 
 
    // nand_powered_on => when 1, outputs are engaged; if 0, all outputs are off
@@ -655,12 +731,22 @@ module novena_fpga(
    reg_r_det reg_det_4110C (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110C),
 			 .ena(!cs0_r && rw_r),
 			 .pulse( adrfifo_rd_pulse ) );
+
+   reg_ro reg_ro_4110E ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110E), //romulator extra status
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {page_addra_over_caught, outstanding_under_caught} ) );
+
+   reg_ro reg_ro_41110 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110E), //romulator debug
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {ddr3_rd_cmd_full, ddr3_rd_dat_en,  // bind names here for
+				  ddr3_rd_dat_full, ddr3_rd_dat_empty,  // easier debug
+				  ddr3_rd_dat_count[6:0]} ) );
    
    
    // FPGA minor version code
    reg_ro reg_ro_41FFC ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFC),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
-			 .reg_d( 16'h0008 ) );
+			 .reg_d( 16'h000C ) );
 
    // FPGA major version code
    reg_ro reg_ro_41FFE ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFE),
@@ -702,8 +788,19 @@ module novena_fpga(
    //    added auto-increment pulse & pulse gate bits to DDR3 interface
    //    modified DDR3 core to have two additional 64-bit read/write ports for LA function
    //////
-   
-   
+   // Minor version 0009, Jun  9 2013
+   //    convert romulator to DDR3 version, for greater ROM depth. Just reads supported for now.
+   //////
+   // Minor version 000A, Jun 10 2013
+   //    fix bugs in DDR3 romulator code
+   //////
+   // Minor version 000B, Jun 10 2013
+   //    moar boogs
+   //////
+   // Minor version 000C, Jun 10 2013
+   //    boogs! boogs! boogs!
+   //    and with this version, we have a working DDR3 romulator servicing reads only
+   //////
    
    // mux between block memory and register set based on high bits
    assign eim_dout = (bus_addr[18:16] != 3'b000) ? ro_d : bram_dout;
@@ -842,7 +939,41 @@ module novena_fpga(
 	      .c1_p3_rd_empty                         (ddr3_p3_rd_empty),
 	      .c1_p3_rd_count                         (ddr3_p3_rd_count),
 	      .c1_p3_rd_overflow                      (ddr3_p3_rd_overflow),
-	      .c1_p3_rd_error                         (ddr3_p3_rd_error)
+	      .c1_p3_rd_error                         (ddr3_p3_rd_error),
+
+
+	      .c1_p4_cmd_clk                          (ddr3_wr_clk),
+	      .c1_p4_cmd_en                           (ddr3_wr_cmd_en),
+	      .c1_p4_cmd_instr                        (ddr3_wr_cmd_instr[2:0]),
+	      .c1_p4_cmd_bl                           (ddr3_wr_cmd_bl[5:0]),
+	      .c1_p4_cmd_byte_addr                    (ddr3_wr_adr[29:0]),
+//	      .c1_p4_cmd_empty                        
+	      .c1_p4_cmd_full                         (ddr3_wr_cmd_full),
+	      .c1_p4_wr_clk                           (ddr3_wr_clk),
+	      .c1_p4_wr_en                            (ddr3_wr_dat_en),
+	      .c1_p4_wr_mask                          (4'b0),
+	      .c1_p4_wr_data                          (ddr3_wr_dat[31:0]),
+	      .c1_p4_wr_full                          (ddr3_wr_full),
+//	      .c1_p4_wr_empty                         
+//	      .c1_p4_wr_underrun                      
+//	      .c1_p4_wr_error                         
+//	      .c1_p4_wr_count
+
+	      .c1_p5_cmd_clk                          (ddr3_rd_clk),
+	      .c1_p5_cmd_en                           (ddr3_rd_cmd_en),
+	      .c1_p5_cmd_instr                        (ddr3_rd_cmd_instr[2:0]),
+	      .c1_p5_cmd_bl                           (ddr3_rd_cmd_bl[5:0]),
+	      .c1_p5_cmd_byte_addr                    (ddr3_rd_adr[29:0]),
+//	      .c1_p5_cmd_empty                        (c1_p5_cmd_empty),
+	      .c1_p5_cmd_full                         (ddr3_rd_cmd_full),
+	      .c1_p5_rd_clk                           (ddr3_rd_clk),
+	      .c1_p5_rd_en                            (ddr3_rd_dat_en),
+	      .c1_p5_rd_data                          (ddr3_rd_dat[31:0]),
+	      .c1_p5_rd_full                          (ddr3_rd_dat_full),
+	      .c1_p5_rd_empty                         (ddr3_rd_dat_empty),
+	      .c1_p5_rd_count                         (ddr3_rd_dat_count[6:0]),
+	      .c1_p5_rd_overflow                      (ddr3_rd_dat_overflow)
+//	      .c1_p5_rd_error                         (c1_p5_rd_error)
 	      );
    
    //////////////

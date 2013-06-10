@@ -59,20 +59,21 @@ module novena_eim(
       lba_r <= lba;
    end
 
-   novena_eim2 eimram(
-		   .clka(bclk),
-		   .ena(!cs0_r && (bus_addr[18:16] == 3'b0)),
-		   .wea(!rw_r),
-		   .addra(bus_addr[15:1]),
-		   .douta(dout[15:0]),
-		   .dina(din_r[15:0]),
+   // leave out the EIM ram on the DDR3 implementation, freeing up space for chipscope
+//   novena_eim2 eimram(
+//		   .clka(bclk),
+//		   .ena(!cs0_r && (bus_addr[18:16] == 3'b0)),
+//		   .wea(!rw_r),
+//		   .addra(bus_addr[15:1]),
+//		   .douta(dout[15:0]),
+//		   .dina(din_r[15:0]),
 		      
-		   .clkb(nram_clk),
-		   .addrb(nram_a[15:0]),
-		   .web(nram_we),
-		   .dinb(nram_din),
-		   .doutb(nram_dout)
-		   );
+//		   .clkb(nram_clk),
+//		   .addrb(nram_a[15:0]),
+//		   .web(nram_we),
+//		   .dinb(nram_din),
+//		   .doutb(nram_dout)
+//		   );
 
    always @(posedge bclk) begin
       if( !lba ) begin // latch address on LBA low

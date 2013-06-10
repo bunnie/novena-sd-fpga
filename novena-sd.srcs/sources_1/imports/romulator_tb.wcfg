@@ -10,7 +10,7 @@
          </top_modules>
       </db_ref>
    </db_ref_list>
-   <WVObjectSize size="32" />
+   <WVObjectSize size="45" />
    <wvobject fp_name="/romulator_tb/reset" type="logic" db_ref_id="1">
       <obj_property name="ElementShortName">reset</obj_property>
       <obj_property name="ObjectShortName">reset</obj_property>
@@ -19,6 +19,14 @@
       <obj_property name="ElementShortName">ram_adr[15:0]</obj_property>
       <obj_property name="ObjectShortName">ram_adr[15:0]</obj_property>
       <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/ram_blank" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ram_blank</obj_property>
+      <obj_property name="ObjectShortName">ram_blank</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/first_read" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">first_read</obj_property>
+      <obj_property name="ObjectShortName">first_read</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_tb/ram_d_to_ram" type="array" db_ref_id="1">
       <obj_property name="ElementShortName">ram_d_to_ram[7:0]</obj_property>
@@ -100,17 +108,39 @@
       <obj_property name="TextColor">230 230 230</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_tb/dut/cstate" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">cstate[8:0]</obj_property>
-      <obj_property name="ObjectShortName">cstate[8:0]</obj_property>
+      <obj_property name="ElementShortName">cstate[9:0]</obj_property>
+      <obj_property name="ObjectShortName">cstate[9:0]</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_tb/dut/nstate" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">nstate[8:0]</obj_property>
-      <obj_property name="ObjectShortName">nstate[8:0]</obj_property>
+      <obj_property name="ElementShortName">nstate[9:0]</obj_property>
+      <obj_property name="ObjectShortName">nstate[9:0]</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_tb/dut/unknown_command" type="array" db_ref_id="1">
       <obj_property name="ElementShortName">unknown_command[7:0]</obj_property>
       <obj_property name="ObjectShortName">unknown_command[7:0]</obj_property>
       <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/nand_adr_updated" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">nand_adr_updated</obj_property>
+      <obj_property name="ObjectShortName">nand_adr_updated</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/nand_adr" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">nand_adr[29:0]</obj_property>
+      <obj_property name="ObjectShortName">nand_adr[29:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/nand_uk_cmd_updated" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">nand_uk_cmd_updated</obj_property>
+      <obj_property name="ObjectShortName">nand_uk_cmd_updated</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/nand_known_cmd" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">nand_known_cmd[7:0]</obj_property>
+      <obj_property name="ObjectShortName">nand_known_cmd[7:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/nand_cmd_updated" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">nand_cmd_updated</obj_property>
+      <obj_property name="ObjectShortName">nand_cmd_updated</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_tb/dut/wr_cyc" type="array" db_ref_id="1">
       <obj_property name="ElementShortName">wr_cyc[2:0]</obj_property>
@@ -154,5 +184,30 @@
       <obj_property name="ElementShortName">row_adr_r[17:0]</obj_property>
       <obj_property name="ObjectShortName">row_adr_r[17:0]</obj_property>
       <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/readybusy_w" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">readybusy_w</obj_property>
+      <obj_property name="ObjectShortName">readybusy_w</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/rb_w_pulse" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">rb_w_pulse</obj_property>
+      <obj_property name="ObjectShortName">rb_w_pulse</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/readybusy_r" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">readybusy_r</obj_property>
+      <obj_property name="ObjectShortName">readybusy_r</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/rb_r_pulse" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">rb_r_pulse</obj_property>
+      <obj_property name="ObjectShortName">rb_r_pulse</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/rb_timer" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">rb_timer[12:0]</obj_property>
+      <obj_property name="ObjectShortName">rb_timer[12:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_tb/dut/rb_counting" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">rb_counting</obj_property>
+      <obj_property name="ObjectShortName">rb_counting</obj_property>
    </wvobject>
 </wave_config>
