@@ -127,7 +127,10 @@ module romulator_ddr3(
    wire [29:0] adr_with_ecc;
 
    assign adr_with_ecc[29:0] = (row_adr_r[17:0] * 12'd2112) + col_adr_r;
-   assign ram_blank = row_adr_r[17:0] >= 18'h1F07C; // factors in ECC data stored in RAM
+   // assumes all of memory available
+   //   assign ram_blank = row_adr_r[17:0] >= 18'h1F07C; // factors in ECC data stored in RAM
+   // assumes top 16MB is reserved for logger function, when enabled
+   assign ram_blank = row_adr_r[17:0] >= 18'h1D174;
    
    ////// commands to implement:
    //  00 / 30 read

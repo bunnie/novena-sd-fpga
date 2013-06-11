@@ -77,21 +77,6 @@ module novena_fpga(
 		   // input wire UIM_PWRON,
 		   // input wire UIM_RESET,
 
-//		   input wire F_DX[18:0],
-
-//		   input wire F_LVDS_N[15:0],
-//		   input wire F_LVDS_P[15:0],
-
-//		   input wire F_LVDS_NA,
-//		   input wire F_LVDS_PA,
-//		   input wire F_LVDS_NB,
-//		   input wire F_LVDS_PB,
-//		   input wire F_LVDS_NC,
-//		   input wire F_LVDS_PC,
-
-//		   input wire F_LVDS_CK_N[1:0],
-//		   input wire F_LVDS_CK_P[1:0],
-
 		   inout wire F_LVDS_N2,  // DAT2
 		   inout wire F_DX14,     // DAT1
 		   inout wire F_LVDS_P4,  // DAT0, DO
@@ -144,6 +129,7 @@ module novena_fpga(
    wire [15:0] 		      eim_din;
    wire 		      clk;   // free-runs at 50 MHz, unbuffered
    wire 		      clk50; // zero-delay, DLL version of above. Use this.
+   wire 		      clk100; // doubled-up version of the above. For time base applications.
    wire 		      bclk;  // NOTE: doesn't run until first CPU access to EIM; then free-runs at 133 MHz
    reg [23:0] 		      counter;
    wire 		      eim_d_t;
@@ -252,7 +238,7 @@ module novena_fpga(
 			  );
 
    ////////////////////////////////////
-   ///// Romulator -- emulate a ROM from EIM
+   ///// nand connections
    ////////////////////////////////////
    wire [7:0] 	      nand_din;
    wire [7:0] 	      nand_dout;
@@ -294,6 +280,9 @@ module novena_fpga(
    wire 	      nand_cs;
    assign nand_cs = F_LVDS_P0;
 
+   ////////////////////////////////////
+   ///// romulator, DDR3 version
+   ////////////////////////////////////
    wire 	      rom_ddr3_reset;
    wire 	      page_addra_over;
    wire 	      outstanding_under;
@@ -396,7 +385,145 @@ module novena_fpga(
 	 end
       end // else: !if(rom_ddr3_reset)
    end // always @ (posedge bclk_dll)
-		       
+
+
+   ////////////////////////////////////
+   ///// nand flash logger
+   ////////////////////////////////////
+   wire [3:0] 	      log_wr_mask;
+   wire [31:0] 	      log_wr_data;
+   wire 	      log_wr_en;
+   wire [6:0] 	      log_wr_count;
+   
+   wire 	      log_cmd_clk;
+   wire [2:0] 	      log_cmd_instr;
+   wire 	      log_cmd_en;
+   wire [5:0] 	      log_cmd_burstlen;
+   wire [29:0] 	      log_cmd_addr;
+   wire 	      log_cmd_full;
+
+   wire [2:0] 	      logbuf_cmd_instr;
+   wire 	      logbuf_cmd_en;
+   wire [5:0] 	      logbuf_cmd_burstlen;
+   wire [29:0] 	      logbuf_cmd_addr;
+   wire 	      logbuf_cmd_full;
+   wire 	      logbuf_empty;
+   
+   wire [63:0] 	      time_t_clk100;
+
+   wire 	      log_reset;
+   wire 	      log_run;
+   wire 	      log_cmd_error;
+   wire 	      log_data_error;
+   wire [26:0]	      log_entries;
+   reg [63:0] 	      time_t_bclk;
+   wire 	      time_t_update;
+   
+   nand_log nand_log(
+		     .bclk(bclk_dll),
+		     .clk100(clk100),
+
+		     .nand_re(nand_re),
+		     .nand_we(nand_we),
+		     .nand_ale(nand_ale),
+		     .nand_cle(nand_cle),
+		     .nand_cs(nand_cs),
+		     .nand_rb(F_DX1),
+		     .nand_din(nand_din),
+		     .nand_uk(nand_uk),
+
+		     .log_reset(log_reset),
+		     .log_run(log_run),
+		     .log_cmd_error(log_cmd_error),
+		     .log_data_error(log_data_error),
+		     .log_entries(log_entries),
+
+		     .ddr3_wr_mask(log_wr_mask),
+		     .ddr3_wr_data(log_wr_data),
+		     .ddr3_wr_en(log_wr_en),
+		     .ddr3_wr_count(ddr3_p2_wr_count),
+		     .ddr3_wr_full(ddr3_p2_wr_full),
+		     .ddr3_wr_empty(ddr3_p2_wr_empty),
+		     .ddr3_cmd_clk(log_cmd_clk),
+		     .ddr3_cmd_instr(log_cmd_instr),
+		     .ddr3_cmd_en(log_cmd_en),
+		     .ddr3_cmd_burstlen(log_cmd_burstlen),
+		     .ddr3_cmd_addr(log_cmd_addr),
+		     .ddr3_cmd_full(ddr3_p2_cmd_full),
+		     .ddr3_cmd_empty(ddr2_p2_cmd_empty),
+
+		     .time_t_clk100(time_t_clk100),
+		     .reset(reset)
+		     );
+
+   // pull time_t into the bclk domain
+   always @(posedge bclk_dll) begin
+      if( time_t_update ) begin
+	 // a bit ugly, because this is a totally asynchronous pull of multiple bits....
+	 // but, I think for this application +/- a few hundred ns is okay because we're using
+	 // the timestamp just to place the SD command cycles within the stream, which themselves
+	 // are being bit-banged and thus take microseconds to issue
+	 time_t_bclk <= time_t_clk100;
+      end else begin
+	 time_t_bclk <= time_t_bclk;
+      end
+   end // always @ (posedge bclk)
+
+   wire log_cmd_overflow, log_cmd_underflow;
+   reg 	log_cmd_overflowed, log_cmd_underflowed;
+   wire [4:0] log_cmd_data_count;
+   reg [4:0]  log_cmd_peak_data_count;
+   reg [6:0]  log_wr_peak_count;
+   /////// command FIFO extension -- add some buffering to the command fifo:
+   // the default IP is too shallow
+   cmd_fifo_exp cmd_fifo_exp(
+			     .clk(log_cmd_clk),
+			     .srst(log_reset),
+			     .din({log_cmd_addr[29:0], log_cmd_burstlen[5:0], log_cmd_instr[2:0]}),
+			     .wr_en(log_cmd_en),
+			     .rd_en(!logbuf_empty && !logbuf_cmd_full),
+			     .dout({logbuf_cmd_addr[29:0], logbuf_cmd_burstlen[5:0], logbuf_cmd_instr[2:0]}),
+			     .full(log_cmd_full),
+			     .overflow(log_cmd_overflow),
+			     .empty(logbuf_empty),
+			     .underflow(log_cmd_underflow),
+			     .data_count(log_cmd_data_count[4:0])
+			     );
+   // some bookeeeping to make sure we don't miss an error event
+   always @(posedge log_cmd_clk) begin
+      if( log_reset ) begin
+	 log_cmd_overflowed <= 1'b0;
+	 log_cmd_underflowed <= 1'b0;
+	 log_cmd_peak_data_count <= 5'b0;
+	 log_wr_peak_count <= 7'b0;
+      end else begin
+	 if( log_cmd_overflow ) begin
+	    log_cmd_overflowed <= 1'b1;
+	 end else begin
+	    log_cmd_overflowed <= log_cmd_overflowed;
+	 end
+
+	 if( log_cmd_underflow ) begin
+	    log_cmd_underflowed <= 1'b1;
+	 end else begin
+	    log_cmd_underflowed <= log_cmd_underflowed;
+	 end
+
+	 if( log_cmd_data_count > log_cmd_peak_data_count ) begin
+	    log_cmd_peak_data_count <= log_cmd_data_count;
+	 end else begin
+	    log_cmd_peak_data_count <= log_cmd_peak_data_count;
+	 end
+
+	 if( log_wr_count > log_wr_peak_count ) begin
+	    log_wr_peak_count <= log_wr_count;
+	 end else begin
+	    log_wr_peak_count <= log_wr_peak_count;
+	 end
+      end // else: !if( log_reset )
+   end // always @ (posedge log_cmd_clk)
+      
+
    ////////////////////////////////////
    ///// address FIFO -- log what addresses are asked of the ROM
    ////////////////////////////////////
@@ -637,7 +764,11 @@ module novena_fpga(
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {nand_powered_on} ) );
 
-			 
+   ///// write control for logger
+   reg_wo reg_wo_40200 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40200),
+			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
+			 .reg_d( {log_run, log_reset} ) );
+   
    //////// read-only registers
    // loopback readback
    reg_ro reg_ro_41000 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41000),
@@ -742,11 +873,50 @@ module novena_fpga(
 				  ddr3_rd_dat_full, ddr3_rd_dat_empty,  // easier debug
 				  ddr3_rd_dat_count[6:0]} ) );
    
+   // read status & data for nand logger interface
+   reg_ro reg_ro_41200 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41200),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {log_wr_peak_count[6:0], log_cmd_peak_data_count[4:0], 
+				  log_cmd_overflowed, log_cmd_underflowed, 
+				  log_cmd_error, log_data_error} ) );
+
+   reg_ro reg_ro_41202 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41202),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( log_entries[15:0] ) );
+			 
+   reg_ro reg_ro_41204 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41204),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( log_entries[26:16] ) );
+
+   reg_ro reg_ro_41206 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41206),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( time_t_bclk[15:0] ) );
+
+   reg_ro reg_ro_41220 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41220), // ooo: supplemental debug
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {log_cmd_full, log_wr_full} ) );
+
+   ///// ASSUME: LSB is read first!!!
+   reg_r_det_early reg_det_41206 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41206),
+			 .ena(!cs0_r && rw_r),
+			 .pulse( time_t_update ) );
+
+   reg_ro reg_ro_41208 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41208),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( time_t_bclk[31:16] ) );
+   
+   reg_ro reg_ro_4120A ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4120A),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( time_t_bclk[47:32] ) );
+
+   reg_ro reg_ro_4120C ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4120C),
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( time_t_bclk[63:48] ) );
    
    // FPGA minor version code
    reg_ro reg_ro_41FFC ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFC),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
-			 .reg_d( 16'h000C ) );
+			 .reg_d( 16'h000D ) );
 
    // FPGA major version code
    reg_ro reg_ro_41FFE ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFE),
@@ -801,6 +971,11 @@ module novena_fpga(
    //    boogs! boogs! boogs!
    //    and with this version, we have a working DDR3 romulator servicing reads only
    //////
+   // Minor version 000D, Jun 11 2013
+   //    add in NAND logger. It runs based upon log_run being set, and it will ignore
+   //    DDR3 writes from the CPU interface when log_run is set
+   //    NAND logging starts 0x0F00_0000, ends at 0x0FFF_FFFF (high 16 MiB)
+   //////
    
    // mux between block memory and register set based on high bits
    assign eim_dout = (bus_addr[18:16] != 3'b000) ? ro_d : bram_dout;
@@ -849,6 +1024,7 @@ module novena_fpga(
 			    .clk50in(clk),
 			    .clk50(clk50),
 			    .clk400(ddr3clk),
+			    .clk100(clk100),
 			    .RESET(reset),
 			    .LOCKED(ddr3_dll_locked)
 			    );
@@ -858,7 +1034,23 @@ module novena_fpga(
    rising_edge p2wrp2e( .clk(bclk_dll), .level(ddr3_p2_wr_en), .pulse(p2_wr_en_pulse) );
    rising_edge p3cmdp2e( .clk(bclk_dll), .level(ddr3_p3_cmd_en), .pulse(p3_cmd_en_pulse) );
    rising_edge p2rdp2e( .clk(bclk_dll), .level(ddr3_p3_rd_en), .pulse(p3_rd_en_pulse) );
-   
+
+   // add mux to switch between CPU-write to DDR3 memory, and logger writing to DDR3
+   wire p2_cmd_en;
+   wire [2:0] p2_cmd_intr;
+   wire [5:0] p2_cmd_bl;
+   wire [29:0] p2_cmd_byte_addr;
+   wire       p2_wr_en;
+   wire [3:0] p2_wr_mask;
+   wire [31:0] p2_wr_data;
+
+   assign p2_cmd_en = log_run ? (!logbuf_empty && !logbuf_cmd_full) : p2_cmd_en_pulse;
+   assign p2_cmd_instr = log_run ? logbuf_cmd_instr : ddr3_p2_cmd_instr;
+   assign p2_cmd_bl = log_run ? logbuf_cmd_burstlen : ddr3_p2_cmd_bl;
+   assign p2_cmd_byte_addr = log_run ? logbuf_cmd_addr : ddr3_p2_cmd_byte_addr;
+   assign p2_wr_en = log_run ? log_wr_en : (p2_wr_en_pulse || (ddr3_p2_wr_pulse & p2_wr_pulse_gate));
+   assign p2_wr_mask = log_run ? log_wr_mask : ddr3_p2_wr_mask;
+   assign p2_wr_data = log_run ? log_wr_data : ddr3_p2_wr_data;
    
    ddr3_if_4port # (
 	      .C1_P0_MASK_SIZE(4),
@@ -905,25 +1097,25 @@ module novena_fpga(
 	      .mcb1_rzq               (F_DDR3_RZQ),  
 	      .mcb1_zio               (F_DDR3_ZIO),
 
-	      /////////////// TODO: add a rising edge detector onto all of the command/read/write enables!!!!!!
-	      
+	      // port 2 shared between logger and CPU interface (based on log_run signal)
 	      .c1_p2_cmd_clk                          (bclk_dll),
-	      .c1_p2_cmd_en                           (p2_cmd_en_pulse),
-	      .c1_p2_cmd_instr                        (ddr3_p2_cmd_instr),
-	      .c1_p2_cmd_bl                           (ddr3_p2_cmd_bl),
-	      .c1_p2_cmd_byte_addr                    (ddr3_p2_cmd_byte_addr),
+	      .c1_p2_cmd_en                           (p2_cmd_en),
+	      .c1_p2_cmd_instr                        (p2_cmd_instr),
+	      .c1_p2_cmd_bl                           (p2_cmd_bl),
+	      .c1_p2_cmd_byte_addr                    (p2_cmd_byte_addr),
 	      .c1_p2_cmd_empty                        (ddr3_p2_cmd_empty),
 	      .c1_p2_cmd_full                         (ddr3_p2_cmd_full),
 	      .c1_p2_wr_clk                           (bclk_dll),
-	      .c1_p2_wr_en                            (p2_wr_en_pulse || 
-						       (ddr3_p2_wr_pulse & p2_wr_pulse_gate)),
-	      .c1_p2_wr_mask                          (ddr3_p2_wr_mask),
-	      .c1_p2_wr_data                          (ddr3_p2_wr_data),
+	      .c1_p2_wr_en                            (p2_wr_en),
+	      .c1_p2_wr_mask                          (p2_wr_mask),
+	      .c1_p2_wr_data                          (p2_wr_data),
 	      .c1_p2_wr_full                          (ddr3_p2_wr_full),
 	      .c1_p2_wr_empty                         (ddr3_p2_wr_empty),
 	      .c1_p2_wr_count                         (ddr3_p2_wr_count),
 	      .c1_p2_wr_underrun                      (ddr3_p2_wr_underrun),
 	      .c1_p2_wr_error                         (ddr3_p2_wr_error),
+
+
 	      .c1_p3_cmd_clk                          (bclk_dll),
 	      .c1_p3_cmd_en                           (p3_cmd_en_pulse),
 	      .c1_p3_cmd_instr                        (ddr3_p3_cmd_instr),
@@ -942,6 +1134,7 @@ module novena_fpga(
 	      .c1_p3_rd_error                         (ddr3_p3_rd_error),
 
 
+	      /////////// romulator read & write ports
 	      .c1_p4_cmd_clk                          (ddr3_wr_clk),
 	      .c1_p4_cmd_en                           (ddr3_wr_cmd_en),
 	      .c1_p4_cmd_instr                        (ddr3_wr_cmd_instr[2:0]),

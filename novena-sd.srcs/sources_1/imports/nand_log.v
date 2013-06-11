@@ -284,11 +284,15 @@ module nand_log(
       cmd_delay <= (cstate == LOG_TIME); // issue command enable one cycle after writes are done
       
       if( log_reset ) begin
-	 log_address <= 30'h0;
+	 log_address <= 30'h0F00_0000; // start log at high memory, 16 megs from top
 	 log_entries <= 27'h0;
       end else if( cmd_delay ) begin
-	 log_address <= log_address + 30'h8; // 64 bits written = 8 bytes
-	 log_entries <= log_entries + 27'h1;
+	 if( log_address < 30'h0FFF_FFF8 ) begin
+	    log_address <= log_address + 30'h8; // 64 bits written = 8 bytes
+	 end else begin
+	    log_address <= log_address; // just keep owerwriting the last spot in case of overflow
+	 end
+	 log_entries <= log_entries + 27'h1; // if entries > 16 MB then we've overflowed
       end else begin
 	 log_address <= log_address;
 	 log_entries <= log_entries;
