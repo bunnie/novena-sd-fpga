@@ -293,10 +293,14 @@ module novena_fpga(
    wire [5:0] 	      ddr3_wr_cmd_bl;
    wire [29:0] 	      ddr3_wr_adr;
    wire 	      ddr3_wr_cmd_full;
+   wire 	      ddr3_wr_cmd_empty;
    wire 	      ddr3_wr_dat_en;
    wire [31:0] 	      ddr3_wr_dat;
    wire 	      ddr3_wr_full;
-		      
+   wire 	      ddr3_wr_empty;
+   wire [6:0] 	      ddr3_wr_dat_count;
+   wire [3:0] 	      ddr3_wr_mask;
+					
    wire 	      ddr3_rd_clk;
    wire 	      ddr3_rd_cmd_en;
    wire [2:0] 	      ddr3_rd_cmd_instr;
@@ -309,6 +313,7 @@ module novena_fpga(
    wire [6:0] 	      ddr3_rd_dat_count;
    wire 	      ddr3_rd_dat_full;
    wire 	      ddr3_rd_dat_overflow; // need to monitor this
+   wire [2:0] 	      ddr_cstate; // debug output
 
    romulator_ddr3 romulator_ddr3(
 				 .clk(bclk_dll),  // 133 MHz
@@ -333,9 +338,12 @@ module novena_fpga(
 				 .ddr3_wr_cmd_bl(ddr3_wr_cmd_bl[5:0]),
 				 .ddr3_wr_adr(ddr3_wr_adr[29:0]),
 				 .ddr3_wr_cmd_full(ddr3_wr_cmd_full),
+				 .ddr3_wr_cmd_empty(ddr3_wr_cmd_empty),
 				 .ddr3_wr_dat_en(ddr3_wr_dat_en),
 				 .ddr3_wr_dat(ddr3_wr_dat[31:0]),
 				 .ddr3_wr_full(ddr3_wr_full),
+				 .ddr3_wr_empty(ddr3_wr_empty),
+				 .ddr3_wr_mask(ddr3_wr_mask[3:0]),
 		      
 				 .ddr3_rd_clk(ddr3_rd_clk),
 				 .ddr3_rd_cmd_en(ddr3_rd_cmd_en),
@@ -361,6 +369,8 @@ module novena_fpga(
 
 				 .nand_adr(nand_adr),
 				 .nand_adr_updated(nand_adr_updated),
+
+				 .ddr_cstate_dbg(ddr_cstate),
 		       
 				 .reset(reset)
 		       );
@@ -418,6 +428,8 @@ module novena_fpga(
    wire [26:0]	      log_entries;
    reg [63:0] 	      time_t_bclk;
    wire 	      time_t_update;
+
+   assign logbuf_cmd_full = ddr3_p2_cmd_full;
    
    nand_log nand_log(
 		     .bclk(bclk_dll),
@@ -425,12 +437,12 @@ module novena_fpga(
 
 		     .nand_re(nand_re),
 		     .nand_we(nand_we),
-		     .nand_ale(nand_ale),
-		     .nand_cle(nand_cle),
 		     .nand_cs(nand_cs),
-		     .nand_rb(F_DX1),
+		     .nand_ale(F_LVDS_NB),
+		     .nand_cle(F_LVDS_P15),
+		     .nand_rb(F_LVDS_N0),
 		     .nand_din(nand_din),
-		     .nand_uk(nand_uk),
+		     .nand_uk(10'b0),
 
 		     .log_reset(log_reset),
 		     .log_run(log_run),
@@ -455,6 +467,8 @@ module novena_fpga(
 		     .time_t_clk100(time_t_clk100),
 		     .reset(reset)
 		     );
+
+   assign log_wr_count = ddr3_p2_wr_count;
 
    // pull time_t into the bclk domain
    always @(posedge bclk_dll) begin
@@ -867,11 +881,20 @@ module novena_fpga(
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {page_addra_over_caught, outstanding_under_caught} ) );
 
-   reg_ro reg_ro_41110 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110E), //romulator debug
+   reg_ro reg_ro_41110 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41110), //romulator debug
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {ddr3_rd_cmd_full, ddr3_rd_dat_en,  // bind names here for
 				  ddr3_rd_dat_full, ddr3_rd_dat_empty,  // easier debug
 				  ddr3_rd_dat_count[6:0]} ) );
+
+   reg_ro reg_ro_41112 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41112), //romulator debug
+			 .bus_d(ro_d), .re(!cs0_r && rw_r),
+			 .reg_d( {ddr_cstate[2:0], 1'b0,
+				  ddr3_wr_cmd_full, ddr3_wr_dat_en, 
+				  ddr3_wr_full, ddr3_wr_empty, 
+				  ddr3_wr_dat_count[6:0]} ) );
+
+
    
    // read status & data for nand logger interface
    reg_ro reg_ro_41200 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41200),
@@ -916,7 +939,7 @@ module novena_fpga(
    // FPGA minor version code
    reg_ro reg_ro_41FFC ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFC),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
-			 .reg_d( 16'h000D ) );
+			 .reg_d( 16'h0013 ) );
 
    // FPGA major version code
    reg_ro reg_ro_41FFE ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFE),
@@ -976,6 +999,31 @@ module novena_fpga(
    //    DDR3 writes from the CPU interface when log_run is set
    //    NAND logging starts 0x0F00_0000, ends at 0x0FFF_FFFF (high 16 MiB)
    //////
+   // Minor version 000E, Jun 11 2013
+   //    add page program support into romulator. Initial version, bugs expected!
+   //////
+   // Minor version 000F, Jun 12 2013
+   //    boog fixes, mostly found through sim work. First attempt at real implementation.
+   //////
+   // Minor version 0010, Jun 12 2013
+   //    derp. boogs at top level. added debug signals to check wr fifo logic irl.
+   //////
+   // Minor version 0011, Jun 13 2013
+   //    Seems like I have to implement partial page programming. We from burst-of-16 for
+   //    write efficiency to burst-of-one for convenience. Writes take a long time anyways on
+   //    real NAND so I'm not bent out of shape that it takes a lot longer to complete. Still
+   //    faster than NAND in the end.
+   //////
+   // Minor version 0012, Jun 13 2013
+   //    Basic functions working; can write a single page via SD interface and read it back.
+   //    Fixing logger integration bugs.
+   //////
+   // Minor version 0013, Jun 15 2013
+   //    Fix bug with row_adr_w not being used correctly, causing page write addresses to change
+   //    part-way through the write process. Suspect that nand_rb is being ignored or not properly
+   //    generated.
+   //////
+   
    
    // mux between block memory and register set based on high bits
    assign eim_dout = (bus_addr[18:16] != 3'b000) ? ro_d : bram_dout;
@@ -1037,21 +1085,30 @@ module novena_fpga(
 
    // add mux to switch between CPU-write to DDR3 memory, and logger writing to DDR3
    wire p2_cmd_en;
-   wire [2:0] p2_cmd_intr;
+   wire [2:0] p2_cmd_instr;
    wire [5:0] p2_cmd_bl;
    wire [29:0] p2_cmd_byte_addr;
    wire       p2_wr_en;
    wire [3:0] p2_wr_mask;
    wire [31:0] p2_wr_data;
 
-   assign p2_cmd_en = log_run ? (!logbuf_empty && !logbuf_cmd_full) : p2_cmd_en_pulse;
-   assign p2_cmd_instr = log_run ? logbuf_cmd_instr : ddr3_p2_cmd_instr;
+   reg 	       log_cmd_en_delay;
+   
+   always @(posedge bclk_dll) begin
+      log_cmd_en_delay <= !logbuf_empty && !logbuf_cmd_full;
+   end
+   
+   assign p2_cmd_en = log_run ? log_cmd_en_delay : p2_cmd_en_pulse;
+   assign p2_cmd_instr[2:0] = log_run ? logbuf_cmd_instr[2:0] : ddr3_p2_cmd_instr[2:0];
    assign p2_cmd_bl = log_run ? logbuf_cmd_burstlen : ddr3_p2_cmd_bl;
    assign p2_cmd_byte_addr = log_run ? logbuf_cmd_addr : ddr3_p2_cmd_byte_addr;
    assign p2_wr_en = log_run ? log_wr_en : (p2_wr_en_pulse || (ddr3_p2_wr_pulse & p2_wr_pulse_gate));
    assign p2_wr_mask = log_run ? log_wr_mask : ddr3_p2_wr_mask;
    assign p2_wr_data = log_run ? log_wr_data : ddr3_p2_wr_data;
    
+   wire ddr3_reset_local;
+   sync_reset ddr3_res_sync( .glbl_reset(log_reset), .clk(ddr3clk), .reset(ddr3_reset_local) );
+
    ddr3_if_4port # (
 	      .C1_P0_MASK_SIZE(4),
 	      .C1_P0_DATA_PORT_SIZE(32),
@@ -1071,7 +1128,7 @@ module novena_fpga(
    u_ddr3_if (
 
 	      .c1_sys_clk             (ddr3clk),
-	      .c1_sys_rst_i           (reset),
+	      .c1_sys_rst_i           (reset | ddr3_reset_local),
 	      
 	      .mcb1_dram_dq           (F_DDR3_D[15:0]),  
 	      .mcb1_dram_a            (F_DDR3_A[13:0]),  
@@ -1140,17 +1197,17 @@ module novena_fpga(
 	      .c1_p4_cmd_instr                        (ddr3_wr_cmd_instr[2:0]),
 	      .c1_p4_cmd_bl                           (ddr3_wr_cmd_bl[5:0]),
 	      .c1_p4_cmd_byte_addr                    (ddr3_wr_adr[29:0]),
-//	      .c1_p4_cmd_empty                        
+	      .c1_p4_cmd_empty                        (ddr3_wr_cmd_empty),
 	      .c1_p4_cmd_full                         (ddr3_wr_cmd_full),
 	      .c1_p4_wr_clk                           (ddr3_wr_clk),
 	      .c1_p4_wr_en                            (ddr3_wr_dat_en),
-	      .c1_p4_wr_mask                          (4'b0),
+	      .c1_p4_wr_mask                          (ddr3_wr_mask[3:0]),
 	      .c1_p4_wr_data                          (ddr3_wr_dat[31:0]),
 	      .c1_p4_wr_full                          (ddr3_wr_full),
-//	      .c1_p4_wr_empty                         
+	      .c1_p4_wr_empty                         (ddr3_wr_empty),
 //	      .c1_p4_wr_underrun                      
 //	      .c1_p4_wr_error                         
-//	      .c1_p4_wr_count
+	      .c1_p4_wr_count                         (ddr3_wr_dat_count[6:0]),
 
 	      .c1_p5_cmd_clk                          (ddr3_rd_clk),
 	      .c1_p5_cmd_en                           (ddr3_rd_cmd_en),

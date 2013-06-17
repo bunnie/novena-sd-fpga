@@ -10,7 +10,7 @@
          </top_modules>
       </db_ref>
    </db_ref_list>
-   <WVObjectSize size="89" />
+   <WVObjectSize size="107" />
    <wvobject fp_name="divider129" type="divider">
       <obj_property name="label">page_buf</obj_property>
       <obj_property name="DisplayName">label</obj_property>
@@ -56,6 +56,14 @@
       <obj_property name="ElementShortName">web[0:0]</obj_property>
       <obj_property name="ObjectShortName">web[0:0]</obj_property>
    </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/page_we" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">page_we</obj_property>
+      <obj_property name="ObjectShortName">page_we</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/page_we_pulse" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">page_we_pulse</obj_property>
+      <obj_property name="ObjectShortName">page_we_pulse</obj_property>
+   </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/pagebuf/addrb" type="array" db_ref_id="1">
       <obj_property name="ElementShortName">addrb[11:0]</obj_property>
       <obj_property name="ObjectShortName">addrb[11:0]</obj_property>
@@ -72,7 +80,7 @@
       <obj_property name="Radix">HEXRADIX</obj_property>
    </wvobject>
    <wvobject fp_name="divider130" type="divider">
-      <obj_property name="label">nand</obj_property>
+      <obj_property name="label">signals to upper level</obj_property>
       <obj_property name="DisplayName">label</obj_property>
       <obj_property name="BkColor">128 128 255</obj_property>
       <obj_property name="TextColor">230 230 230</obj_property>
@@ -116,6 +124,10 @@
       <obj_property name="ObjectShortName">ddr3_wr_adr[29:0]</obj_property>
       <obj_property name="Radix">HEXRADIX</obj_property>
    </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_mask" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_mask[3:0]</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_mask[3:0]</obj_property>
+   </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/ddr3_wr_dat_en" type="logic" db_ref_id="1">
       <obj_property name="ElementShortName">ddr3_wr_dat_en</obj_property>
       <obj_property name="ObjectShortName">ddr3_wr_dat_en</obj_property>
@@ -150,17 +162,26 @@
       <obj_property name="ElementShortName">ddr3_rd_dat_en</obj_property>
       <obj_property name="ObjectShortName">ddr3_rd_dat_en</obj_property>
    </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/page_addra_over" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">page_addra_over</obj_property>
-      <obj_property name="ObjectShortName">page_addra_over</obj_property>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/write_ptr" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">write_ptr[11:0]</obj_property>
+      <obj_property name="ObjectShortName">write_ptr[11:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
    </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/outstanding_under" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">outstanding_under</obj_property>
-      <obj_property name="ObjectShortName">outstanding_under</obj_property>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/pagewr_start" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">pagewr_start[11:0]</obj_property>
+      <obj_property name="ObjectShortName">pagewr_start[11:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
    </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/clk" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">clk</obj_property>
-      <obj_property name="ObjectShortName">clk</obj_property>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/pagewr_end" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">pagewr_end[11:0]</obj_property>
+      <obj_property name="ObjectShortName">pagewr_end[11:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="divider144" type="divider">
+      <obj_property name="label">nand signals</obj_property>
+      <obj_property name="DisplayName">label</obj_property>
+      <obj_property name="BkColor">128 128 255</obj_property>
+      <obj_property name="TextColor">230 230 230</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/nand_we" type="logic" db_ref_id="1">
       <obj_property name="ElementShortName">nand_we</obj_property>
@@ -203,14 +224,6 @@
       <obj_property name="ElementShortName">rom_ddr3_reset</obj_property>
       <obj_property name="ObjectShortName">rom_ddr3_reset</obj_property>
    </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/ddr3_wr_cmd_full" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_cmd_full</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_cmd_full</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/ddr3_wr_full" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_full</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_full</obj_property>
-   </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/ddr3_rd_cmd_full" type="logic" db_ref_id="1">
       <obj_property name="ElementShortName">ddr3_rd_cmd_full</obj_property>
       <obj_property name="ObjectShortName">ddr3_rd_cmd_full</obj_property>
@@ -239,12 +252,40 @@
       <obj_property name="TextColor">230 230 230</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/cstate" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">cstate[9:0]</obj_property>
-      <obj_property name="ObjectShortName">cstate[9:0]</obj_property>
+      <obj_property name="ElementShortName">cstate[10:0]</obj_property>
+      <obj_property name="ObjectShortName">cstate[10:0]</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/nstate" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">nstate[9:0]</obj_property>
-      <obj_property name="ObjectShortName">nstate[9:0]</obj_property>
+      <obj_property name="ElementShortName">nstate[10:0]</obj_property>
+      <obj_property name="ObjectShortName">nstate[10:0]</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/rb_w_pulse" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">rb_w_pulse</obj_property>
+      <obj_property name="ObjectShortName">rb_w_pulse</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/rb_r_pulse" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">rb_r_pulse</obj_property>
+      <obj_property name="ObjectShortName">rb_r_pulse</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/wr_cyc" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">wr_cyc[11:0]</obj_property>
+      <obj_property name="ObjectShortName">wr_cyc[11:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/rd_cycle" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">rd_cycle[3:0]</obj_property>
+      <obj_property name="ObjectShortName">rd_cycle[3:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/col_adr" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">col_adr[11:0]</obj_property>
+      <obj_property name="ObjectShortName">col_adr[11:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/row_adr" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">row_adr[17:0]</obj_property>
+      <obj_property name="ObjectShortName">row_adr[17:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/ddr_cstate" type="array" db_ref_id="1">
       <obj_property name="ElementShortName">ddr_cstate[2:0]</obj_property>
@@ -264,13 +305,77 @@
       <obj_property name="ObjectShortName">outstanding[6:0]</obj_property>
       <obj_property name="Radix">HEXRADIX</obj_property>
    </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/wr_bytes" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">wr_bytes[4:0]</obj_property>
+      <obj_property name="ObjectShortName">wr_bytes[4:0]</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_adr" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_adr[29:0]</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_adr[29:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_clk" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_clk</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_clk</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_bl" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_cmd_bl[5:0]</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_cmd_bl[5:0]</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_en" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_cmd_en</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_cmd_en</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_full" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_cmd_full</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_cmd_full</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_empty" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_cmd_empty</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_cmd_empty</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_instr" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_cmd_instr[2:0]</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_cmd_instr[2:0]</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/ddr3_wr_cmd_full" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_cmd_full</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_cmd_full</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/ddr3_wr_full" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_full</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_full</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/ddr3_wr_empty" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_empty</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_empty</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_dat" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_dat[31:0]</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_dat[31:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_dat_en" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_dat_en</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_dat_en</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_full" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wr_full</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wr_full</obj_property>
+   </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/outstanding_under" type="logic" db_ref_id="1">
       <obj_property name="ElementShortName">outstanding_under</obj_property>
       <obj_property name="ObjectShortName">outstanding_under</obj_property>
    </wvobject>
+   <wvobject fp_name="divider143" type="divider">
+      <obj_property name="label">read stuff</obj_property>
+      <obj_property name="DisplayName">label</obj_property>
+      <obj_property name="BkColor">128 128 255</obj_property>
+      <obj_property name="TextColor">230 230 230</obj_property>
+   </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/page_addra" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">page_addra[9:0]</obj_property>
-      <obj_property name="ObjectShortName">page_addra[9:0]</obj_property>
+      <obj_property name="ElementShortName">page_addra[11:0]</obj_property>
+      <obj_property name="ObjectShortName">page_addra[11:0]</obj_property>
       <obj_property name="Radix">HEXRADIX</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/page_addra_over" type="logic" db_ref_id="1">
@@ -328,44 +433,6 @@
       <obj_property name="ElementShortName">ddr3_rd_dat_overflow</obj_property>
       <obj_property name="ObjectShortName">ddr3_rd_dat_overflow</obj_property>
    </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_adr" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_adr[29:0]</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_adr[29:0]</obj_property>
-      <obj_property name="Radix">HEXRADIX</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_clk" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_clk</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_clk</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_bl" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_cmd_bl[5:0]</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_cmd_bl[5:0]</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_en" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_cmd_en</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_cmd_en</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_full" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_cmd_full</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_cmd_full</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_cmd_instr" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_cmd_instr[2:0]</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_cmd_instr[2:0]</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_dat" type="array" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_dat[31:0]</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_dat[31:0]</obj_property>
-      <obj_property name="Radix">HEXRADIX</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_dat_en" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_dat_en</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_dat_en</obj_property>
-   </wvobject>
-   <wvobject fp_name="/romulator_ddr3_tb/dut/ddr3_wr_full" type="logic" db_ref_id="1">
-      <obj_property name="ElementShortName">ddr3_wr_full</obj_property>
-      <obj_property name="ObjectShortName">ddr3_wr_full</obj_property>
-   </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/dut/ddr_reset" type="logic" db_ref_id="1">
       <obj_property name="ElementShortName">ddr_reset</obj_property>
       <obj_property name="ObjectShortName">ddr_reset</obj_property>
@@ -375,6 +442,25 @@
       <obj_property name="DisplayName">label</obj_property>
       <obj_property name="BkColor">128 128 255</obj_property>
       <obj_property name="TextColor">230 230 230</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/wcmd_count" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">wcmd_count[1:0]</obj_property>
+      <obj_property name="ObjectShortName">wcmd_count[1:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/wdata_count" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">wdata_count[7:0]</obj_property>
+      <obj_property name="ObjectShortName">wdata_count[7:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/wlatency_timer" type="array" db_ref_id="1">
+      <obj_property name="ElementShortName">wlatency_timer[31:0]</obj_property>
+      <obj_property name="ObjectShortName">wlatency_timer[31:0]</obj_property>
+      <obj_property name="Radix">HEXRADIX</obj_property>
+   </wvobject>
+   <wvobject fp_name="/romulator_ddr3_tb/ddr3_wgo" type="logic" db_ref_id="1">
+      <obj_property name="ElementShortName">ddr3_wgo</obj_property>
+      <obj_property name="ObjectShortName">ddr3_wgo</obj_property>
    </wvobject>
    <wvobject fp_name="/romulator_ddr3_tb/cmd_count" type="array" db_ref_id="1">
       <obj_property name="ElementShortName">cmd_count[1:0]</obj_property>

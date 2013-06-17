@@ -21,7 +21,7 @@ module reg_wo(
 
    assign reg_d = state;
 
-   always @(bus_a or my_a or re) begin
+   always @(bus_a or my_a or re or state) begin
       if( (bus_a[18:1] == my_a[18:1]) && re ) begin
 	 rbk_d = state;
       end else begin
