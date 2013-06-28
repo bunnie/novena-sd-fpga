@@ -18,6 +18,9 @@
 //////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
+`define USE_ROMULATOR 1
+`define USE_NANDLOG 1
+
 module novena_fpga(
 		   output wire       APOPTOSIS,
 		   
@@ -125,7 +128,7 @@ module novena_fpga(
 		   input wire RESETBMCU
 	 );
 
-   wire [15:0] 		      eim_dout;
+   reg [15:0] 		      eim_dout;
    wire [15:0] 		      eim_din;
    wire 		      clk;   // free-runs at 50 MHz, unbuffered
    wire 		      clk50; // zero-delay, DLL version of above. Use this.
@@ -190,52 +193,39 @@ module novena_fpga(
    sync_reset master_res_sync( .glbl_reset(!RESETBMCU), .clk(clk), .reset(reset) );
      
    wire 	      bclk_dll, bclk_div2_dll, bclk_div4_dll, bclk_locked;
+   wire 	      bclk_early;
    
    ////////////////////////////////////
    ///// BCLK DLL -- generate zero-delay clock plus slower versions for internal use
    ////////////////////////////////////
+   wire 	      bclk_int_in, bclk_io_in;
+   IBUFG   clkibufg (.I(EIM_BCLK), .O(bclk) );
+   BUFG    bclk_dll_bufg(.I(bclk), .O(bclk_int_in) );
    
-   bclk_dll bclk_dll_mod( .CLK_IN1(bclk), .CLK_OUT1(bclk_dll), .CLK_OUT2(bclk_div2_dll),
-			  .CLK_OUT3(bclk_div4_dll), .RESET(reset), .LOCKED(bclk_locked));
+   bclk_dll bclk_dll_mod( .clk133in(bclk_int_in), .clk133(bclk_dll),
+			  .RESET(reset), .LOCKED(bclk_locked));
 
-   ////////////////////////////////////
-   ///// Block RAM section -- an area-efficient piece of memory we can write to and store data from the CPU
-   ////////////////////////////////////
+   wire 	      i_reset, i_locked;
+   wire 	      o_reset, o_locked;
+   wire 	      bclk_i, bclk_o;
+   wire 	      i_fbk_out, i_fbk_in;
+   wire 	      o_fbk_out, o_fbk_in;
    
-   wire [15:0]	      bram_dout;
+   dcm_delay bclk_i_dll( .clk133(bclk_int_in), .clk133out(bclk_i),
+			  .CLKFB_IN(i_fbk_in), .CLKFB_OUT(i_fbk_out),
+			  .RESET(i_reset), .LOCKED(i_locked));
+
+   dcm_delay bclk_o_dll( .clk133(bclk_int_in), .clk133out(bclk_o),
+			  .CLKFB_IN(o_fbk_in), .CLKFB_OUT(o_fbk_out),
+			  .RESET(o_reset), .LOCKED(o_locked));
    
-   wire [15:0] 	      ram_adr;
-   wire [7:0] 	      ram_d_to_ram;
-   wire [7:0] 	      ram_d_from_ram;
-   wire 	      ram_we;
-   wire 	      ram_clk_to_ram;
-
-   // tie down unused bits in the DDR3 romulator implementation
-   assign ram_clk_to_ram = bclk_dll;
-   assign ram_adr = 16'b0;
-   assign ram_d_to_ram = 8'b0;
-   assign ram_we = 1'b0;
+   // lock it to the input path
+   BUFIO2FB bclk_o_fbk(.I(bclk_o), .O(o_fbk_in));
+   // assign o_fbk_in = bclk_o;
+//   BUFG bclk_io_fbk(.I(bclk_io), .O(io_fbk_in));
    
-   novena_eim novena_eim (
-			  .din(eim_din),
-			  .dout(bram_dout),
-			  .clk(clk50),
-			  .reset(reset),
-
-			  .bclk(bclk_dll),
-			  .cs(EIM_CS),
-			  .hi_addr(EIM_A),
-			  .lba(EIM_LBA),
-			  .oe(EIM_OE),
-			  .rw(EIM_RW),
-			  .rb_wait(EIM_WAIT),
-
-			  .nram_clk(ram_clk_to_ram),
-			  .nram_a(ram_adr),
-			  .nram_din(ram_d_to_ram),
-			  .nram_dout(ram_d_from_ram),
-			  .nram_we(ram_we)
-			  );
+   assign i_fbk_in = bclk_i;
+   
 
    ////////////////////////////////////
    ///// nand connections
@@ -263,7 +253,11 @@ module novena_fpga(
    assign F_DX3      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[6] : 1'bZ;
    assign F_DX0      = (nand_drive_out & romulator_on & nand_powered_on) ? nand_dout[7] : 1'bZ;
 
-   assign F_LVDS_N0  = romulator_on & nand_powered_on ? (nand_rb | bypass_rb) : 1'bZ;
+   reg 		      nand_rb_r;
+   always @(posedge bclk_dll) begin
+      nand_rb_r <= nand_rb; // just to make the timing engine happier, no material effect on design
+   end
+   assign F_LVDS_N0  = romulator_on & nand_powered_on ? (nand_rb_r | bypass_rb) : 1'bZ;
       
    // nand_re, nand_we are edge signals, so use a BUFG to distribute as clock
    IBUFG nand_we_ibufgp(.I(F_LVDS_PB), .O(nand_we_ibufg) );
@@ -314,7 +308,7 @@ module novena_fpga(
    wire 	      ddr3_rd_dat_full;
    wire 	      ddr3_rd_dat_overflow; // need to monitor this
    wire [2:0] 	      ddr_cstate; // debug output
-
+`ifdef USE_ROMULATOR
    romulator_ddr3 romulator_ddr3(
 				 .clk(bclk_dll),  // 133 MHz
 		       
@@ -374,7 +368,7 @@ module novena_fpga(
 		       
 				 .reset(reset)
 		       );
-   
+`endif
    reg 		      page_addra_over_caught;
    reg 		      outstanding_under_caught;
    always @(posedge bclk_dll) begin
@@ -430,7 +424,7 @@ module novena_fpga(
    wire 	      time_t_update;
 
    assign logbuf_cmd_full = ddr3_p2_cmd_full;
-   
+`ifdef USE_NANDLOG   
    nand_log nand_log(
 		     .bclk(bclk_dll),
 		     .clk100(clk100),
@@ -467,7 +461,7 @@ module novena_fpga(
 		     .time_t_clk100(time_t_clk100),
 		     .reset(reset)
 		     );
-
+`endif
    assign log_wr_count = ddr3_p2_wr_count;
 
    // pull time_t into the bclk domain
@@ -565,13 +559,20 @@ module novena_fpga(
    assign nand_adr_updated_pulse = log_adr_end ? (!nadr_up_d & (nand_adr_up_clean & !nand_cs_clean)) | 
 				   (nadr_up_d & !(nand_adr_up_clean & !nand_cs_clean)) :
 				   (!nadr_up_d & nand_adr_up_clean);
+
+   reg [29:0] nand_adr_pipe;
+   reg 	      nand_adr_updated_pulse_pipe;
+   always @(posedge bclk_dll) begin
+      nand_adr_pipe <= nand_adr;
+      nand_adr_updated_pulse_pipe <= nand_adr_updated_pulse;
+   end
    
    nandadr_fifo nandadr_fifo(
 		   .rst(adrfifo_rst),
 		   .wr_clk(bclk_dll),
 		   .rd_clk(bclk_dll),
-		   .din(nand_adr[29:0]),
-		   .wr_en(nand_adr_updated_pulse),
+		   .din(nand_adr_pipe[29:0]),
+		   .wr_en(nand_adr_updated_pulse_pipe),
 		   .rd_en(adrfifo_rd_pulse),
 		   .dout(adrfifo_data[29:0]),
 		   .full(adrfifo_full),
@@ -668,18 +669,31 @@ module novena_fpga(
    
    reg 		      cs0_r, rw_r;
    reg [15:0] 	      din_r;
-   reg [18:0] 	      bus_addr;
-   always @(posedge bclk_dll) begin
-      cs0_r <= EIM_CS[0];
-      rw_r <= EIM_RW;
-      din_r <= eim_din;
+   reg [18:0] 	      bus_addr_r;
+   reg 		      adv_r;
+
+   reg 		      cs0_in, rw_in, adv_in;
+   reg [15:0] 	      din_in;
+   reg [2:0] 	      a_in;
+   
+   always @(posedge bclk_i) begin
+      cs0_in <= EIM_CS[0];
+      rw_in <= EIM_RW;
+      din_in <= eim_din;
+      adv_in <= !EIM_LBA; // latch address on LBA low
+      a_in <= EIM_A[18:16];
+
+      cs0_r <= cs0_in;
+      rw_r <= rw_in;
+      din_r <= din_in;
+      adv_r <= adv_in;
    end
    
-   always @(posedge bclk_dll) begin
-      if( !EIM_LBA ) begin // latch address on LBA low
-	 bus_addr <= {EIM_A, eim_din};
+   always @(posedge bclk_i) begin 
+      if( adv_in ) begin
+	 bus_addr_r <= {a_in, din_in};
       end else begin
-	 bus_addr <= bus_addr;
+	 bus_addr_r <= bus_addr_r;
       end
    end
 
@@ -689,75 +703,76 @@ module novena_fpga(
    wire [15:0] ro_d;
 
    //////// write-only registers
-   reg_wo reg_wo_40000 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40000),
+   reg_wo reg_wo_40000 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40000),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( r40000wo[15:0] ) );
    
-   reg_wo reg_wo_40002 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40002),
+   reg_wo reg_wo_40002 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40002),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(1'b0), .rbk_d(ro_d), // unreadable
 			 .reg_d( r40002wo[15:0] ) );
 
    ///// GPIO registers
    ///// NOTE: GPIOA is also gated by nand_powered_on in this application!!!!
-   reg_wo reg_wo_40010 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40010),
+   reg_wo reg_wo_40010 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40010),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( gpioA_dout[15:0] ) );
 
-   reg_wo reg_wo_40012 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40012),
+   reg_wo reg_wo_40012 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40012),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( gpioA_dir[15:0] ) );
 			 
    // write control for p2
    // check alignment of verilog when port specs are too short
    wire [1:0]  dummy_40020;
-   reg_wo reg_wo_40020 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40020),
+   reg_wo reg_wo_40020 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40020),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {p2_wr_pulse_gate, dummy_40020[1:0], ddr3_p2_cmd_bl[5:0], 
 				  ddr3_p2_cmd_en, ddr3_p2_cmd_instr[2:0] } ) );
 
-   reg_wo reg_wo_40022 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40022),
+   reg_wo reg_wo_40022 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40022),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_cmd_byte_addr[15:0] ) );
 
-   reg_wo reg_wo_40024 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40024),
+   reg_wo reg_wo_40024 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40024),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_cmd_byte_addr[29:16] ) );
 
-   reg_wo reg_wo_40026 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40026),
+   reg_wo reg_wo_40026 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40026),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {ddr3_p2_wr_en, ddr3_p2_wr_mask[3:0]} ) );
 
-   reg_wo reg_wo_40028 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40028),
+   reg_wo reg_wo_40028 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40028),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_wr_data[15:0] ) );
 
-   reg_wo reg_wo_4002A ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4002A),
+   reg_wo reg_wo_4002A ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4002A),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p2_wr_data[31:16] ) );
    
-   reg_r_det reg_det_4102A (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4002A),
+   reg_r_det reg_det_4102A (.clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4002A),
 			 .ena(!cs0_r && !rw_r),
 			 .pulse( ddr3_p2_wr_pulse ) );
    
    // read control for p3
-   wire [1:0]     dummy_40030;
-   
-   reg_wo reg_wo_40030 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40030),
+   wire        burst_mode;
+   wire [3:0]  reg_40030_dummy;
+   reg_wo reg_wo_40030 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40030),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
-			 .reg_d( {p3_rd_pulse_gate, dummy_40030[1:0], ddr3_p3_cmd_bl[5:0], 
+			 .reg_d( {burst_mode, reg_40030_dummy[3:2], p3_rd_pulse_gate, 
+				  reg_40030_dummy[1:0], ddr3_p3_cmd_bl[5:0], 
 				  ddr3_p3_cmd_en, ddr3_p3_cmd_instr[2:0] } ) );
 
-   reg_wo reg_wo_40032 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40032),
+   reg_wo reg_wo_40032 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40032),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p3_cmd_byte_addr[15:0] ) );
 
-   reg_wo reg_wo_40034 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40034),
+   reg_wo reg_wo_40034 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40034),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( ddr3_p3_cmd_byte_addr[29:16] ) );
 
 
    wire [3:0]        ddr3_p3_dummy;
-   reg_wo reg_wo_40036 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40036),
+   reg_wo reg_wo_40036 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40036),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {ddr3_p3_rd_en, ddr3_p3_dummy[3:0]} ) );
 
@@ -767,29 +782,29 @@ module novena_fpga(
    // cmdfifo_rst  resets the command fifo
    // ukfifo_rst   resets the unknown commands fifo
    // log_adr_end  enables address termination logging when set
-   reg_wo reg_wo_40100 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40100),
+   reg_wo reg_wo_40100 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40100),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {rom_ddr3_reset, adrfifo_rst, 
 				  bypass_rb, cmdfifo_rst, ukfifo_rst, log_adr_end} ) );
 
 
    // nand_powered_on => when 1, outputs are engaged; if 0, all outputs are off
-   reg_wo reg_wo_40102 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40102),
+   reg_wo reg_wo_40102 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40102),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {nand_powered_on} ) );
 
    ///// write control for logger
-   reg_wo reg_wo_40200 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h40200),
+   reg_wo reg_wo_40200 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h40200),
 			 .bus_d(din_r), .we(!cs0_r && !rw_r), .re(!cs0_r && rw_r), .rbk_d(ro_d), 
 			 .reg_d( {log_run, log_reset} ) );
    
    //////// read-only registers
    // loopback readback
-   reg_ro reg_ro_41000 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41000),
+   reg_ro reg_ro_41000 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41000),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( r40000wo[15:0] ) );
 
-   reg_ro reg_ro_41002 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41002),
+   reg_ro reg_ro_41002 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41002),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( r40002wo[15:0] ) );
 
@@ -797,17 +812,17 @@ module novena_fpga(
    // 0    : DDR3 DLL lock
    // 1    : DDR3 calibration done
    // 15-2 : reads as 0
-   reg_ro reg_ro_41004 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41004),
+   reg_ro reg_ro_41004 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41004),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {ddr3_calib_done, ddr3_dll_locked} ) );
 
    //// GPIO registers
-   reg_ro reg_ro_41010 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41010),
+   reg_ro reg_ro_41010 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41010),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( gpioA_din[15:0] ) );
 
    /////// ddr p2 write status
-   reg_ro reg_ro_41020 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41020),
+   reg_ro reg_ro_41020 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41020),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {ddr3_p2_wr_count[6:0],
 				  2'b00,
@@ -816,7 +831,7 @@ module novena_fpga(
 				  ddr3_p2_wr_underrun, ddr3_p2_wr_error} ) );
 
    /////// ddr p3 read status & data
-   reg_ro reg_ro_41030 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41030),
+   reg_ro reg_ro_41030 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41030),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {ddr3_p3_rd_count[6:0],
 				  2'b00,
@@ -824,70 +839,70 @@ module novena_fpga(
 				  ddr3_p3_rd_full, ddr3_p3_rd_empty, 
 				  ddr3_p3_rd_overflow, ddr3_p3_rd_error} ) );
 
-   reg_ro reg_ro_41032 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41032),
+   reg_ro reg_ro_41032 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41032),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( ddr3_p3_rd_data[15:0] ) );
    
-   reg_ro reg_ro_41034 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41034),
+   reg_ro reg_ro_41034 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41034),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( ddr3_p3_rd_data[31:16] ) );
 
-   reg_r_det reg_det_41034 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41034),
+   reg_r_det reg_det_41034 (.clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41034),
 			 .ena(!cs0_r && rw_r),
 			 .pulse( ddr3_p3_rd_pulse ) );
    
    // read status & data for romulator
-   reg_ro reg_ro_41100 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41100),
+   reg_ro reg_ro_41100 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41100),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {8'b0, ukfifo_data[7:0]} ) );
 
-   reg_r_det reg_det_41100 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41100),
+   reg_r_det reg_det_41100 (.clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41100),
 			 .ena(!cs0_r && rw_r),
 			 .pulse( ukfifo_rd_pulse ) );
 				
-   reg_ro reg_ro_41102 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41102),
+   reg_ro reg_ro_41102 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41102),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {1'b0, ukfifo_full, ukfifo_over, ukfifo_empty, ukfifo_count[11:0]} ) );
 
-   reg_ro reg_ro_41104 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41104),
+   reg_ro reg_ro_41104 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41104),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {8'b0, cmdfifo_data[7:0]} ) );
 
-   reg_r_det reg_det_41104 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41104),
+   reg_r_det reg_det_41104 (.clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41104),
 			 .ena(!cs0_r && rw_r),
 			 .pulse( cmdfifo_rd_pulse ) );
 				
-   reg_ro reg_ro_41106 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41106),
+   reg_ro reg_ro_41106 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41106),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {1'b0, cmdfifo_full, cmdfifo_over, cmdfifo_empty, cmdfifo_count[11:0]} ) );
 
-   reg_ro reg_ro_41108 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41108),
+   reg_ro reg_ro_41108 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41108),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {adrfifo_full, adrfifo_empty, adrfifo_count[13:0]} ) );
 
-   reg_ro reg_ro_4110A ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110A),
+   reg_ro reg_ro_4110A ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4110A),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {adrfifo_data[15:0]} ) );
 
-   reg_ro reg_ro_4110C ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110C),
+   reg_ro reg_ro_4110C ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4110C),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {2'b0,adrfifo_data[29:16]} ) );
 
-   reg_r_det reg_det_4110C (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110C),
+   reg_r_det reg_det_4110C (.clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4110C),
 			 .ena(!cs0_r && rw_r),
 			 .pulse( adrfifo_rd_pulse ) );
 
-   reg_ro reg_ro_4110E ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4110E), //romulator extra status
+   reg_ro reg_ro_4110E ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4110E), //romulator extra status
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {page_addra_over_caught, outstanding_under_caught} ) );
 
-   reg_ro reg_ro_41110 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41110), //romulator debug
+   reg_ro reg_ro_41110 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41110), //romulator debug
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {ddr3_rd_cmd_full, ddr3_rd_dat_en,  // bind names here for
 				  ddr3_rd_dat_full, ddr3_rd_dat_empty,  // easier debug
 				  ddr3_rd_dat_count[6:0]} ) );
 
-   reg_ro reg_ro_41112 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41112), //romulator debug
+   reg_ro reg_ro_41112 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41112), //romulator debug
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {ddr_cstate[2:0], 1'b0,
 				  ddr3_wr_cmd_full, ddr3_wr_dat_en, 
@@ -897,56 +912,117 @@ module novena_fpga(
 
    
    // read status & data for nand logger interface
-   reg_ro reg_ro_41200 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41200),
+   reg_ro reg_ro_41200 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41200),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {log_wr_peak_count[6:0], log_cmd_peak_data_count[4:0], 
 				  log_cmd_overflowed, log_cmd_underflowed, 
 				  log_cmd_error, log_data_error} ) );
 
-   reg_ro reg_ro_41202 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41202),
+   reg_ro reg_ro_41202 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41202),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( log_entries[15:0] ) );
 			 
-   reg_ro reg_ro_41204 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41204),
+   reg_ro reg_ro_41204 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41204),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( log_entries[26:16] ) );
 
-   reg_ro reg_ro_41206 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41206),
+   reg_ro reg_ro_41206 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41206),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( time_t_bclk[15:0] ) );
 
-   reg_ro reg_ro_41220 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41220), // ooo: supplemental debug
+   reg_ro reg_ro_41220 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41220), // ooo: supplemental debug
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( {log_cmd_full, log_wr_full} ) );
 
    ///// ASSUME: LSB is read first!!!
-   reg_r_det_early reg_det_41206 (.clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41206),
+   reg_r_det_early reg_det_41206 (.clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41206),
 			 .ena(!cs0_r && rw_r),
 			 .pulse( time_t_update ) );
 
-   reg_ro reg_ro_41208 ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41208),
+   reg_ro reg_ro_41208 ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41208),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( time_t_bclk[31:16] ) );
    
-   reg_ro reg_ro_4120A ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4120A),
+   reg_ro reg_ro_4120A ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4120A),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( time_t_bclk[47:32] ) );
 
-   reg_ro reg_ro_4120C ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h4120C),
+   reg_ro reg_ro_4120C ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h4120C),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( time_t_bclk[63:48] ) );
+
+
+   ///////////////////////
+   ///////////////////////
+   // CS1 bank registers: minimum size here is 64-bit, tuned for synchronous burst access only
+   ///////////////////////
+
+   wire [63:0] 	     rC04_0000wo;
+   wire [63:0] 	     rC04_0008wo;
+   wire [15:0] 	     ro_d_b;
+   
+   ///////// write registers
+   // loopback test
+   reg_wo_4burst reg_wo_4b_C04_0000( .clk(bclk_dll), .bus_ad(eim_din), .my_a(19'h4_0000), 
+				     .bus_a(EIM_A[18:16]), .adv(!EIM_LBA), .rw(EIM_RW), .cs(!EIM_CS[1]), 
+				     .reg_d( rC04_0000wo[63:0] ), .rbk_d(ro_d_b) );
+
+   reg_wo_4burst reg_wo_4b_C04_0008( .clk(bclk_dll), .bus_ad(eim_din), .my_a(19'h4_0008),
+				     .bus_a(EIM_A[18:16]), .adv(!EIM_LBA), .rw(EIM_RW), .cs(!EIM_CS[1]),
+				     .reg_d( rC04_0008wo[63:0] ), .rbk_d(ro_d_b) );
+
+   wire [63:0] 	     burst_ctl;
+   wire 	     burst_stb;
+      reg_wo_4burst reg_wo_4b_C04_0100( .clk(bclk_dll), .bus_ad(eim_din), .my_a(19'h4_0100),
+				     .bus_a(EIM_A[18:16]), .adv(!EIM_LBA), .rw(EIM_RW), .cs(!EIM_CS[1]),
+				     .reg_d( burst_ctl[63:0] ), .rbk_d(ro_d_b), .strobe(burst_stb) );
+   
+
+   ///////// read registers
+   // loopback test
+   reg_ro_4burst reg_ro_4b_C04_1000( .clk(bclk_dll), .bus_ad(eim_din), .my_a(19'h4_1000),
+				     .bus_a(EIM_A[18:16]), .adv(!EIM_LBA), .rw(EIM_RW), .cs(!EIM_CS[1]),
+				     .reg_d( rC04_0000wo[63:0] ), .rbk_d(ro_d_b) );
+
+   reg_ro_4burst reg_ro_4b_C04_1008( .clk(bclk_dll), .bus_ad(eim_din), .my_a(19'h4_1008),
+				     .bus_a(EIM_A[18:16]), .adv(!EIM_LBA), .rw(EIM_RW), .cs(!EIM_CS[1]),
+				     .reg_d( rC04_0008wo[63:0] ), .rbk_d(ro_d_b) );
+
+   wire [63:0] 	     burst_status;
+   reg_ro_4burst reg_ro_4b_C04_1108( .clk(bclk_dll), .bus_ad(eim_din), .my_a(19'h4_1108),
+				     .bus_a(EIM_A[18:16]), .adv(!EIM_LBA), .rw(EIM_RW), .cs(!EIM_CS[1]),
+				     .reg_d( burst_status ), .rbk_d(ro_d_b) );
+   
+   wire [63:0] 	     burst_data;
+   wire 	     burst_data_stb;
+   reg_ro_4burst reg_ro_4b_C04_1100( .clk(bclk_dll), .bus_ad(eim_din), .my_a(19'h4_1100),
+				     .bus_a(EIM_A[18:16]), .adv(!EIM_LBA), .rw(EIM_RW), .cs(!EIM_CS[1]),
+				     .reg_d( burst_data ), .rbk_d(ro_d_b), .strobe(burst_data_stb) );
+   
    
    // FPGA minor version code
-   reg_ro reg_ro_41FFC ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFC),
+   reg_ro reg_ro_41FFC ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41FFC),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
-			 .reg_d( 16'h0013 ) );
+			 .reg_d( 16'h001A ) );
 
    // FPGA major version code
-   reg_ro reg_ro_41FFE ( .clk(bclk_dll), .bus_a(bus_addr), .my_a(19'h41FFE),
+   reg_ro reg_ro_41FFE ( .clk(bclk_dll), .bus_a(bus_addr_r), .my_a(19'h41FFE),
 			 .bus_d(ro_d), .re(!cs0_r && rw_r),
 			 .reg_d( 16'h0001 ) );
 
    ////////// VERSION LOG (major version 0001) /////////////
+   //////
+   // Minor version 001A, Jun 28 2013
+   //    Fix bugs in burst DDR3 interface. Add read count to burst interface to help debug
+   //    compiler issues where 32-bit accesses are generated instead of 64-bit accesses.
+   //////
+   // Minor version 0019, Jun 28 2013
+   //    Fixed timing constraints, closure pretty much guaranteed @ 133 MHz. Only constraint
+   //    that may typically fail is clk-q for data output, but only by 0.2ns.
+   //    Added burst DDR3 read interface (first rev).
+   //    Converted issue log to be most-recent at top, so you don't have to scroll all the way
+   //    down to read the most recent message.
+   //////
    // minor version 0001, May 26 2013
    //    Initial test release. Has 32kiB of mapped 16-bit RAM at 0x0800.0000 - 0x0800.7FFE
    //    write-only registers are from 0x0804.0000 - 0x0804.0FFE, 16-bit only
@@ -1023,10 +1099,43 @@ module novena_fpga(
    //    part-way through the write process. Suspect that nand_rb is being ignored or not properly
    //    generated.
    //////
-   
+   // Minor version 0014, Jun 19 2013
+   //    Add support for page erase operations.
+   //////
+   // Minor version 0015, Jun 19 2013
+   //    Fix operation size for erase operations to be 256kB pages
+   //////
+   // Minor version 0016, Jun 21 2013
+   //    Fix problem with DDR3 reset during reset log (tripping reset causes garbage to write into memory)
+   //////
+   // Minor version 0017, Jun 21 2013
+   //    Add CS1 interface with burst capability
+   //////
+   // Minor version 0018, Jun 21 2013
+   //    Add timing constraints to improve performance of MAP/PAR
+   //////
    
    // mux between block memory and register set based on high bits
-   assign eim_dout = (bus_addr[18:16] != 3'b000) ? ro_d : bram_dout;
+   //   assign eim_dout = (bus_addr[18:16] != 3'b000) ? ro_d : bram_dout;
+   // pipeline to improve timing
+   reg [15:0]		     ro_d_r;
+   reg [15:0] 		     ro_d_b_r;
+   reg [1:0] 		     eim_rdcs;
+   reg [15:0] 		     eim_dout_pipe;
+   reg [15:0] 		     eim_dout_pipe2;
+   
+   always @(posedge bclk_dll) begin
+      ro_d_r <= ro_d;
+      ro_d_b_r <= ro_d_b;
+      eim_rdcs[1:0] <= EIM_CS[1:0];
+      eim_dout_pipe <= (eim_rdcs[1:0] == 2'b10) ? ro_d_r : ro_d_b_r;
+   end
+
+   always @(posedge bclk_o) begin
+      eim_dout_pipe2 <= eim_dout_pipe; // retime near the source to allow max time for wire delay
+      eim_dout <= eim_dout_pipe2; // no time to do anything but transit between these domains
+   end;
+   
 
    //////////////
    /// "heartbeat" counter
@@ -1041,7 +1150,6 @@ module novena_fpga(
    // IOBUFs as required by design
    //////////////
    IBUFGDS clkibufgds( .I(CLK2_P), .IB(CLK2_N), .O(clk) );
-   IBUFG   clkibufg (.I(EIM_BCLK), .O(bclk) );
 
    assign eim_d_t = EIM_OE | !EIM_LBA;
    
@@ -1105,8 +1213,48 @@ module novena_fpga(
    assign p2_wr_en = log_run ? log_wr_en : (p2_wr_en_pulse || (ddr3_p2_wr_pulse & p2_wr_pulse_gate));
    assign p2_wr_mask = log_run ? log_wr_mask : ddr3_p2_wr_mask;
    assign p2_wr_data = log_run ? log_wr_data : ddr3_p2_wr_data;
-   
+
+   wire p3_cmd_en;
+   wire p3_burst_cmd_en;
+   wire [2:0] p3_cmd_instr;
+   wire [2:0] p3_burst_cmd_instr;
+   wire [5:0] p3_cmd_bl;
+   wire [5:0] p3_burst_cmd_bl;
+   wire [29:0] p3_cmd_byte_addr;
+   wire [29:0] p3_burst_addr;
+   wire        p3_rd_en;
+   wire        p3_burst_rd_en;
+
+   assign p3_cmd_en = burst_mode ? p3_burst_cmd_en : p3_cmd_en_pulse;
+   assign p3_cmd_instr = burst_mode ? p3_burst_cmd_instr : ddr3_p3_cmd_instr;
+   assign p3_cmd_bl = burst_mode ? p3_burst_cmd_bl : ddr3_p3_cmd_bl;
+   assign p3_cmd_byte_addr = burst_mode ? p3_burst_addr : ddr3_p3_cmd_byte_addr;
+   assign p3_rd_en = burst_mode ? p3_burst_rd_en : (p3_rd_en_pulse || (ddr3_p3_rd_pulse & p3_rd_pulse_gate));
+
    wire ddr3_reset_local;
+   ddr3_eim_cs1 cs1_adapter(.clk(bclk_dll),
+			    .ctl(burst_ctl),
+			    .ctl_stb(burst_stb),
+			    .burst_rd(burst_data[63:0]),
+			    .rd_stb(burst_data_stb),
+			    .status(burst_status[63:0]),
+
+			    .ddr3_rd_cmd(p3_burst_cmd_instr),
+			    .ddr3_rd_bl(p3_burst_cmd_bl),
+			    .ddr3_rd_adr(p3_burst_addr),
+			    .ddr3_rd_cmd_en(p3_burst_cmd_en),
+			    .ddr3_rd_cmd_empty(ddr3_p3_cmd_empty),
+			    .ddr3_rd_cmd_full(ddr3_p3_cmd_full),
+
+			    .ddr3_rd_data(ddr3_p3_rd_data[31:0]),
+			    .ddr3_rd_count(ddr3_p3_rd_count),
+			    .ddr3_rd_empty(ddr3_p3_rd_empty),
+			    .ddr3_rd_full(ddr3_p3_rd_full),
+			    .ddr3_rd_en(p3_burst_rd_en),
+			    
+			    .reset(ddr3_reset_local)
+			    );
+   
    sync_reset ddr3_res_sync( .glbl_reset(log_reset), .clk(ddr3clk), .reset(ddr3_reset_local) );
 
    ddr3_if_4port # (
@@ -1128,7 +1276,7 @@ module novena_fpga(
    u_ddr3_if (
 
 	      .c1_sys_clk             (ddr3clk),
-	      .c1_sys_rst_i           (reset | ddr3_reset_local),
+	      .c1_sys_rst_i           (reset),
 	      
 	      .mcb1_dram_dq           (F_DDR3_D[15:0]),  
 	      .mcb1_dram_a            (F_DDR3_A[13:0]),  
@@ -1172,17 +1320,16 @@ module novena_fpga(
 	      .c1_p2_wr_underrun                      (ddr3_p2_wr_underrun),
 	      .c1_p2_wr_error                         (ddr3_p2_wr_error),
 
-
+	      // port 3 shared between cs0 and cs1 burst read interfaces
 	      .c1_p3_cmd_clk                          (bclk_dll),
-	      .c1_p3_cmd_en                           (p3_cmd_en_pulse),
-	      .c1_p3_cmd_instr                        (ddr3_p3_cmd_instr),
-	      .c1_p3_cmd_bl                           (ddr3_p3_cmd_bl),
-	      .c1_p3_cmd_byte_addr                    (ddr3_p3_cmd_byte_addr),
+	      .c1_p3_cmd_en                           (p3_cmd_en),
+	      .c1_p3_cmd_instr                        (p3_cmd_instr),
+	      .c1_p3_cmd_bl                           (p3_cmd_bl),
+	      .c1_p3_cmd_byte_addr                    (p3_cmd_byte_addr),
 	      .c1_p3_cmd_empty                        (ddr3_p3_cmd_empty),
 	      .c1_p3_cmd_full                         (ddr3_p3_cmd_full),
 	      .c1_p3_rd_clk                           (bclk_dll),
-	      .c1_p3_rd_en                            (p3_rd_en_pulse || 
-						       (ddr3_p3_rd_pulse & p3_rd_pulse_gate)),
+	      .c1_p3_rd_en                            (p3_rd_en),
 	      .c1_p3_rd_data                          (ddr3_p3_rd_data),
 	      .c1_p3_rd_full                          (ddr3_p3_rd_full),
 	      .c1_p3_rd_empty                         (ddr3_p3_rd_empty),

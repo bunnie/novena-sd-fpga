@@ -632,6 +632,71 @@ module romulator_ddr3_tb;
 	 
       end
    endtask; // nand_write_op
+
+
+   task nand_erase_op;
+      input [29:0] adr;
+      begin
+	 testdat  = 8'b0;
+	 
+	 nand_cs = 1'b0;
+
+	 nand_cle = 1'b1;
+	 nand_ale = 1'b0;
+	 nand_we = 1'b0;
+	 nand_din = 8'h60;
+	 #25;
+	 nand_we = 1'b1;
+	 #5;
+	 nand_cle = 1'b0;
+	 nand_ale = 1'b1;
+	 
+	 nand_din = adr[19:12];
+	 #20;
+
+	 nand_we = 1'b0;
+	 #25;
+	 nand_we = 1'b1;
+	 #5;
+	 
+	 nand_din = adr[27:20];
+	 #20;
+	 
+	 nand_we = 1'b0;
+	 #25;
+	 nand_we = 1'b1;
+	 #5;
+	 
+	 nand_din = {6'b0,adr[29:28]};
+	 #20;
+	 
+	 nand_we = 1'b0;
+	 #25;
+	 nand_we = 1'b1;
+	 #5;
+	 nand_ale = 1'b0;
+	 #25;
+
+	 nand_cle = 1'b1;
+	 nand_din = 8'hD0;
+	 nand_ale = 1'b0;
+	 #20;
+	 
+	 nand_we = 1'b0;
+	 #25;
+	 nand_we = 1'b1;
+	 #5;
+
+	 nand_cle = 1'b0;
+
+	 while( nand_rb == 1'b0 ) begin
+	    #50;
+	 end
+	 
+	 nand_cs = 1'b1;
+	 
+      end
+   endtask; // nand_erase_op
    
    
    initial begin
@@ -723,6 +788,9 @@ module romulator_ddr3_tb;
       
       reset_op();
       #100;
+
+      nand_erase_op(29'h100210);
+      #1000;
       
       nand_read_id();
       #500;

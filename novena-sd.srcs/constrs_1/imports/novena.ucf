@@ -6,13 +6,66 @@ CONFIG VCCAUX  = 3.3;
 # Valid values are 2.5 and 3.3
 CONFIG MCB_PERFORMANCE  = EXTENDED;
 
+### define setup/hold constraints on nand we/re edges
+NET "F_LVDS_CK_P1" TNM_NET = "TNM_nand_re";
+TIMESPEC TS_nand_re = PERIOD "TNM_nand_re" 50 MHz;
+
+# these should be 12/5 timings, but making it 13/7 (s/h) to simplify P&R. Measurements
+# indicate actual margin available is much marger than 12/5
+OFFSET = IN 13 ns VALID 20 ns BEFORE "F_LVDS_CK_P1" RISING;
+OFFSET = IN 13 ns VALID 20 ns BEFORE "F_LVDS_CK_P1" FALLING;
+# I think this should be IN 12 ns VALID 5 ns BEFORE, but for some reason this form
+# gives a hold time requirement of -7ns. So I've added 12 ns to make the hold time req 5ns
+
+NET "F_LVDS_PB" TNM_NET = "TNM_nand_we";
+TIMESPEC TS_nand_we = PERIOD "TNM_nand_we" 50 MHz;
+OFFSET = IN 13 ns VALID 20 ns BEFORE "F_LVDS_PB" RISING;
+OFFSET = IN 13 ns VALID 20 ns BEFORE "F_LVDS_PB" FALLING;
+
+### define setup/hold constraints for EIM
+OFFSET = IN 4125 ps VALID 4750 ps BEFORE "bclk";
+# this was also supposed to be IN 4125 ps VALID 625 ps BEFORE "bclk", but
+# the computation gives me -3.5ns slack on hold time, so...add 4750 ps to the hold again.
+#5200 ps is the true limit
+OFFSET = OUT 5000 ps AFTER "bclk";
+
+
 ##################################################################################
 # Timing Ignore constraints for paths crossing the clock domain 
 ##################################################################################
 NET "u_ddr3_if/memc?_wrapper_inst/mcb_ui_top_inst/mcb_raw_wrapper_inst/selfrefresh_mcb_mode" TIG;
 NET "u_ddr3_if/c?_pll_lock" TIG;
 INST "u_ddr3_if/memc?_wrapper_inst/mcb_ui_top_inst/mcb_raw_wrapper_inst/gen_term_calib.mcb_soft_calibration_top_inst/mcb_soft_calibration_inst/DONE_SOFTANDHARD_CAL*" TIG;
-NET "ddr3_reset_local" TIG;
+# NET "ddr3_reset_local" TIG;  ## removed
+NET "romulator_ddr3/local_reset" TIG;
+NET "romulator_ddr3/ddr_reset" TIG;
+
+# eliminate false timing path of bclk to nand data output. Actual path is
+# from nand_re and has at a minimum 15ns available, typically much much more
+NET "romulator_ddr3/nand_dout[*]" TIG;
+
+NET "reg_wo_40102/state[*]" TIG;
+NET "reg_wo_40100/state[*]" TIG;
+NET "gpioA_dir[*]" TIG;
+NET "gpioA_dout[*]" TIG;
+NET "reg_ro_41010/state[*]" TIG;
+# don't sweat the R/B signal, we have tons of margin on it
+NET "nand_rb_r" TIG;
+
+## isolate the time group of flip flops at the head-end of the async path
+## from the pads to the bclk domain determining the ready/busy status
+TIMEGRP rb_w_grp =   FFS("romulator_ddr3/rb_w1");
+TIMEGRP rb_r_grp =   FFS("romulator_ddr3/rb_r1");
+TIMEGRP rb_e_grp =   FFS("romulator_ddr3/rb_e1");
+# also isolate the nand async capture flops
+TIMEGRP nand_re_grp =   FFS("nand_log/cap_red1");
+TIMEGRP nand_we_grp =   FFS("nand_log/cap_wed1");
+TIMEGRP nand_we_pg_grp =   FFS("romulator_ddr3/page_we_d");
+TIMEGRP nand_we_up_grp =   FFS("romulator_ddr3/nand_cmd_updated");
+
+TIMEGRP pad_ignore_grp =  "rb_w_grp" "rb_r_grp" "rb_e_grp" "nand_re_grp" "nand_we_grp" "nand_we_pg_grp" "nand_we_up_grp";
+## now relax to 12 ns, instead of 7.5ns
+TIMESPEC TS_pad_ignore = FROM  PADS TO "pad_ignore_grp" 12 ns;
 
 #Please uncomment the below TIG if used in a design which enables self-refresh mode
 #NET "u_ddr3_if/memc?_wrapper_inst/mcb_ui_top_inst/mcb_raw_wrapper_inst/gen_term_calib.mcb_soft_calibration_top_inst/mcb_soft_calibration_inst/SELFREFRESH_MCB_REQ" TIG;
@@ -36,6 +89,11 @@ NET "clk" TNM_NET = "clk_tnm";
 NET "bclk" TNM_NET = "bclk_tnm";
 TIMESPEC TS_clk = PERIOD "clk_tnm" 50 MHz;
 TIMESPEC TS_bclk = PERIOD "bclk_tnm" 133 MHz;
+
+### a failed experiment to make timing close using DCM explicit phase shifts
+#NET "bclk_early" TNM_NET = "bclkp90_tnm";
+#TIMESPEC TS_bclkp90 = PERIOD "bclkp90_tnm" TS_bclk PHASE + 1870 ps; # spec in the phase shift manually
+#OFFSET = OUT 6870 ps AFTER "bclk_early"; # add in the phase shift manually for this clock
 
 # nand_re hacks...
 PIN "nand_re_bufgp.O" CLOCK_DEDICATED_ROUTE = FALSE;
@@ -100,36 +158,52 @@ NET "EIM_CS[1]" IOSTANDARD = LVCMOS33;
 
 NET "EIM_DA[0]" LOC = G9;
 NET "EIM_DA[0]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[0]" SLEW = FAST;
 NET "EIM_DA[1]" LOC = A10;
 NET "EIM_DA[1]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[1]" SLEW = FAST;
 NET "EIM_DA[2]" LOC = F9;
 NET "EIM_DA[2]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[2]" SLEW = FAST;
 NET "EIM_DA[3]" LOC = B9;
 NET "EIM_DA[3]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[3]" SLEW = FAST;
 NET "EIM_DA[4]" LOC = E13;
 NET "EIM_DA[4]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[4]" SLEW = FAST;
 NET "EIM_DA[5]" LOC = F13;
 NET "EIM_DA[5]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[5]" SLEW = FAST;
 NET "EIM_DA[6]" LOC = A9;
 NET "EIM_DA[6]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[6]" SLEW = FAST;
 NET "EIM_DA[7]" LOC = A8;
 NET "EIM_DA[7]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[7]" SLEW = FAST;
 NET "EIM_DA[8]" LOC = B8;
 NET "EIM_DA[8]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[8]" SLEW = FAST;
 NET "EIM_DA[9]" LOC = D8;
 NET "EIM_DA[9]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[9]" SLEW = FAST;
 NET "EIM_DA[10]" LOC = D11;
 NET "EIM_DA[10]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[10]" SLEW = FAST;
 NET "EIM_DA[11]" LOC = C8;
 NET "EIM_DA[11]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[11]" SLEW = FAST;
 NET "EIM_DA[12]" LOC = C7;
 NET "EIM_DA[12]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[12]" SLEW = FAST;
 NET "EIM_DA[13]" LOC = C11;
 NET "EIM_DA[13]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[13]" SLEW = FAST;
 NET "EIM_DA[14]" LOC = C4;
 NET "EIM_DA[14]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[14]" SLEW = FAST;
 NET "EIM_DA[15]" LOC = B6;
 NET "EIM_DA[15]" IOSTANDARD = LVCMOS33;
+NET "EIM_DA[15]" SLEW = FAST;
 
 NET "EIM_A[16]" LOC = A11;
 NET "EIM_A[16]" IOSTANDARD = LVCMOS33;

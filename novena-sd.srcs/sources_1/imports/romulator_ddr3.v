@@ -108,13 +108,13 @@ module romulator_ddr3(
 		      output reg nand_uk_cmd_updated,
 		      
 		      output wire [7:0] nand_known_cmd,
-		      output wire nand_cmd_updated,
+		      output reg nand_cmd_updated,
 		      
 		      output wire [29:0] nand_adr,
 		      output wire nand_adr_updated,
 
 		      // debug signals
-		      output wire [2:0] ddr_cstate_dbg,
+		      output wire [3:0] ddr_cstate_dbg,
 
 		      input wire reset
 		 );
@@ -154,20 +154,22 @@ module romulator_ddr3(
    //  all other commands should be noted as unprocessable via status register
    //   (keep a small FIFO of unusable commands for debug purposes)
    
-   parameter NAND_IDLE     = 11'b1 << 0;
-   parameter NAND_ID0      = 11'b1 << 1;
-   parameter NAND_READ0    = 11'b1 << 2;
-   parameter NAND_READ_GO  = 11'b1 << 3;
-   parameter NAND_RESET    = 11'b1 << 4;
-   parameter NAND_DOUT0    = 11'b1 << 5;
-   parameter NAND_STAT0    = 11'b1 << 6;
-   parameter NAND_UNKNOWN0 = 11'b1 << 7;
-   parameter NAND_ID1      = 11'b1 << 8;
-   parameter NAND_PROG0    = 11'b1 << 9;
-   parameter NAND_PROG_GO  = 11'b1 << 10;
+   parameter NAND_IDLE     = 13'b1 << 0;
+   parameter NAND_ID0      = 13'b1 << 1;
+   parameter NAND_READ0    = 13'b1 << 2;
+   parameter NAND_READ_GO  = 13'b1 << 3;
+   parameter NAND_RESET    = 13'b1 << 4;
+   parameter NAND_DOUT0    = 13'b1 << 5;
+   parameter NAND_STAT0    = 13'b1 << 6;
+   parameter NAND_UNKNOWN0 = 13'b1 << 7;
+   parameter NAND_ID1      = 13'b1 << 8;
+   parameter NAND_PROG0    = 13'b1 << 9;
+   parameter NAND_PROG_GO  = 13'b1 << 10;
+   parameter NAND_ERASE0   = 13'b1 << 11;
+   parameter NAND_ERASE_GO = 13'b1 << 12;
    
    // don't forget to change bit widths of nSTATES and above '1' constant if you add a state
-   parameter NAND_nSTATES = 11;
+   parameter NAND_nSTATES = 13;
    reg [(NAND_nSTATES - 1):0] 		 cstate;
    reg [(NAND_nSTATES - 1):0] 		 nstate;
 
@@ -181,10 +183,12 @@ module romulator_ddr3(
    parameter CMD_STATUS  = 8'h70;
    parameter CMD_PROG    = 8'h80;
    parameter CMD_PROG_GO = 8'h10;
-   // commands to do: 60, c0, 40
+   parameter CMD_ERASE   = 8'h60;
+   parameter CMD_ERASE_GO= 8'hD0;
 
    reg 					 readybusy_w; // these signals trigger an async timer
    reg					 readybusy_r;
+   reg 					 readybusy_e;
    
    reg [7:0] 				 unknown_command;
    reg [7:0] 				 known_command;
@@ -192,8 +196,10 @@ module romulator_ddr3(
    assign nand_uk_cmd = unknown_command;
    assign nand_known_cmd = known_command;
    // capture on falling edge of nand_we when nand_cle active
-   assign nand_cmd_updated = !(nand_cle & !nand_we); 
-
+   always @(posedge clk) begin
+      nand_cmd_updated <= !(nand_cle & !nand_we);
+   end
+   
    always @(posedge nand_we or posedge local_reset) begin
       if(local_reset) begin
 	 cstate <= NAND_IDLE;
@@ -208,60 +214,84 @@ module romulator_ddr3(
 	 if( nand_din == CMD_ID ) begin // done
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_ID0;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_READ ) begin // done
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_READ0;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_READ_GO ) begin // done
 	    readybusy_r <= 1'b1;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_READ_GO;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_RESET ) begin // done
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_RESET;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_DATAOUT ) begin // done
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_DOUT0;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_DATA_GO ) begin // done
 	    readybusy_r <= 1'b1;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_READ_GO; // note same state as follows CMD_READ_GO
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_STATUS ) begin // done
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_STAT0;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_PROG ) begin 
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_PROG0;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else if( nand_din == CMD_PROG_GO ) begin 
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b1;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_PROG_GO;
+	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
+	 end else if( nand_din == CMD_ERASE ) begin 
+	    readybusy_r <= 1'b0;
+	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
+	    nstate <= NAND_ERASE0;
+	    unknown_command <= unknown_command;
+	    known_command <= nand_din;
+	 end else if( nand_din == CMD_ERASE_GO ) begin 
+	    readybusy_r <= 1'b0;
+	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b1;
+	    nstate <= NAND_ERASE_GO;
 	    unknown_command <= unknown_command;
 	    known_command <= nand_din;
 	 end else begin
 	    readybusy_r <= 1'b0;
 	    readybusy_w <= 1'b0;
+	    readybusy_e <= 1'b0;
 	    nstate <= NAND_UNKNOWN0; // done
 	    unknown_command <= nand_din;
 	    known_command <= nand_din;
@@ -269,6 +299,7 @@ module romulator_ddr3(
       end else begin // if (!nand_cs && nand_cle && !nand_ale)
 	 readybusy_r <= 1'b0;
 	 readybusy_w <= 1'b0;
+	 readybusy_e <= 1'b0;
 	 unknown_command <= unknown_command;
 	 known_command <= known_command;
 	 // if not a CLE cycle, decode based upon current state
@@ -300,6 +331,11 @@ module romulator_ddr3(
 	      nstate <= NAND_PROG0;
 	   end
 
+	   NAND_ERASE0: begin
+	      // locked in this state until the next cle cycle resets us out of it
+	      nstate <= NAND_ERASE0;
+	   end
+
 	   NAND_DOUT0: begin
 	      // locked in this state until the next cle cycle resets us out of it
 	      nstate <= NAND_DOUT0;
@@ -318,6 +354,9 @@ module romulator_ddr3(
 	   NAND_PROG_GO: begin
 	      nstate <= NAND_IDLE;
 	   end
+	   NAND_ERASE_GO: begin
+	      nstate <= NAND_IDLE;
+	   end
 	   default: begin
 	      nstate <= NAND_IDLE;
 	   end
@@ -331,6 +370,7 @@ module romulator_ddr3(
    reg [11:0] col_adr;
    reg [17:0] row_adr; // bits 29-12 of overall address
    reg [17:0] row_adr_w; // save the row_adr value for use later (in case it's changed during prog)
+   reg [17:0] row_adr_e; // save row_adr for erase as well, and separately
    reg page_we;
    reg [7:0] nand_din_cap;
    reg [11:0] 				 pagewr_start; // start of partial program 
@@ -345,6 +385,7 @@ module romulator_ddr3(
 	 pagewr_start <= 12'b0;
 	 pagewr_end <= 12'b0;
 	 row_adr_w <= 12'h1c2; // default garbage writes to location 0xE1000, or ECC offset 0xE8080
+	 row_adr_e <= 12'h1c3; // default garbage erases as well
       end else begin
 	 case (cstate)
 	   NAND_IDLE: begin
@@ -354,6 +395,7 @@ module romulator_ddr3(
 	      pagewr_start <= pagewr_start;
 	      pagewr_end <= pagewr_end;
 	      row_adr_w <= row_adr_w;
+	      row_adr_e <= row_adr_e;
 	   end
 	   NAND_UNKNOWN0: begin
 	      nand_uk_cmd_updated <= 1'b1;
@@ -362,6 +404,7 @@ module romulator_ddr3(
 	      pagewr_start <= pagewr_start;
 	      pagewr_end <= pagewr_end;
 	      row_adr_w <= row_adr_w;
+	      row_adr_e <= row_adr_e;
 	   end
 	   NAND_RESET: begin
 	      nand_uk_cmd_updated <= 1'b0;
@@ -370,9 +413,11 @@ module romulator_ddr3(
 	      pagewr_start <= 12'b0;
 	      pagewr_end <= 12'b0;
 	      row_adr_w <= 12'h1c2;
+	      row_adr_e <= 12'h1c3;
 	   end
 	   NAND_READ0: begin
 	      row_adr_w <= row_adr_w;
+	      row_adr_e <= row_adr_e;
 	      nand_uk_cmd_updated <= 1'b0;
 	      page_we <= 1'b0;
 	      if( wr_cyc == 3'h0 ) begin
@@ -398,6 +443,7 @@ module romulator_ddr3(
 	   end // case: NAND_READ0
 	   NAND_DOUT0: begin
 	      row_adr_w <= row_adr_w;
+	      row_adr_e <= row_adr_e;
 	      nand_uk_cmd_updated <= 1'b0;
 	      page_we <= 1'b0;
 	      if( wr_cyc == 3'h0 ) begin
@@ -414,6 +460,7 @@ module romulator_ddr3(
 	   end // case: NAND_DOUT0
 	   NAND_READ_GO: begin
 	      row_adr_w <= row_adr_w;
+	      row_adr_e <= row_adr_e;
 	      nand_uk_cmd_updated <= 1'b0;
 	      wr_cyc <= 12'b0;
 	      page_we <= 1'b0;
@@ -421,6 +468,7 @@ module romulator_ddr3(
 	      pagewr_end <= pagewr_end;
 	   end
 	   NAND_PROG0: begin
+	      row_adr_e <= row_adr_e;
 	      nand_uk_cmd_updated <= 1'b0;
 	      if( wr_cyc == 12'h0 ) begin
 		 row_adr_w <= row_adr_w;
@@ -482,22 +530,60 @@ module romulator_ddr3(
 		 pagewr_start <= pagewr_start;
 		 pagewr_end <= pagewr_end;
 		 row_adr <= row_adr;
-		 page_we <= 1'b0;
+                   		 page_we <= 1'b0;
 		 wr_cyc <= wr_cyc;
 		 col_adr[11:0] <= col_adr[11:0];
 	      end
 	   end
 	   NAND_PROG_GO: begin
 	      row_adr_w <= row_adr_w;
+	      row_adr_e <= row_adr_e;
 	      pagewr_start <= pagewr_start;
 	      pagewr_end <= pagewr_end - 12'h1; 
 	      page_we <= 1'b0;
 	      nand_uk_cmd_updated <= 1'b0;
 	      wr_cyc <= 12'b0;
 	   end
+
+	   NAND_ERASE0: begin
+	      page_we <= 1'b0;
+	      pagewr_start <= pagewr_start;
+	      pagewr_end <= pagewr_end;
+	      col_adr <= col_adr;
+	      row_adr_w <= row_adr_w;
+	      nand_uk_cmd_updated <= 1'b0;
+	      if( wr_cyc == 12'h0) begin
+		 row_adr_e <= row_adr_e;
+		 wr_cyc <= wr_cyc + 12'h1;
+		 row_adr[7:0] <= {nand_din[7], 7'b0};
+	      end else if( wr_cyc == 12'h1 ) begin
+		 row_adr_e <= row_adr_e;
+		 wr_cyc <= wr_cyc + 12'h1;
+		 row_adr[15:8] <= nand_din[7:0];
+	      end else if( wr_cyc == 12'h2 ) begin
+		 wr_cyc <= wr_cyc + 12'h1;
+		 row_adr[17:16] <= nand_din[1:0];
+		 row_adr_e[17:0] <= {nand_din[1:0],row_adr[15:0]};
+	      end else begin
+		 row_adr_e <= row_adr_e;
+		 row_adr <= row_adr;
+		 wr_cyc <= wr_cyc;
+	      end
+	   end
+	   NAND_ERASE_GO: begin
+	      row_adr_w <= row_adr_w;
+	      row_adr_e <= row_adr_e;
+	      pagewr_start <= pagewr_start;
+	      pagewr_end <= pagewr_end; 
+	      page_we <= 1'b0;
+	      nand_uk_cmd_updated <= 1'b0;
+	      wr_cyc <= 12'b0;
+	   end
+
 	   default: begin
 	      // NAND_ID1 is a nop
 	      // NAND_STAT0 is a nop
+	      row_adr_e <= row_adr_e;
 	      row_adr_w <= row_adr_w;
 	      pagewr_start <= pagewr_start;
 	      pagewr_end <= pagewr_end;
@@ -533,13 +619,13 @@ module romulator_ddr3(
 
    reg 	      first_read; // delay incremeting address after the first read falling edge
    assign nand_adr_updated = !first_read; // latch address on rising edge of adr_updated
-      always @(negedge nand_re or posedge nand_cle or posedge local_reset) begin
-      if( nand_cle || local_reset ) begin
+      always @(negedge nand_re or posedge nand_cle) begin
+      if( nand_cle ) begin
 	 rd_cycle <= 4'b0;
 	 special_data <= 8'b0;
 	 special_en <= 1'b0;
 	 first_read <= 1'b1;
-	 // asynchronously copy over col/row adr when cle is set, or if in reset....
+	 // asynchronously copy over col/row adr when cle is set....
 	 col_adr_r <= col_adr;
 	 row_adr_r <= row_adr;
       end else begin
@@ -583,6 +669,7 @@ module romulator_ddr3(
 	   NAND_READ_GO: begin
 	      if( first_read ) begin
 		 first_read <= 1'b0;
+		 col_adr_r <= col_adr_r;
 	      end else if( col_adr_r < 12'd2112 ) begin
 		 col_adr_r <= col_adr_r + 12'b1; // increment the column address
 	      end else begin 
@@ -597,11 +684,13 @@ module romulator_ddr3(
 	      special_en <= 1'b0;
 	   end
 	 endcase // case (cstate)
-      end
+      end // else: !if( nand_cle )
    end
 
-   reg rb_w, rb_w1, rb_w_pulse;
-   reg rb_r, rb_r1, rb_r_pulse;
+   (* ASYNC_REG="TRUE" *) reg rb_w1, rb_r1, rb_e1;
+   reg rb_w, rb_w_pulse;
+   reg rb_r, rb_r_pulse;
+   reg rb_e, rb_e_pulse;
    reg [12:0] rb_timer;
    reg 	     rb_counting;
    
@@ -613,6 +702,9 @@ module romulator_ddr3(
       rb_r1 <= readybusy_r;
       rb_r <= rb_r1;
 
+      rb_e1 <= readybusy_e;
+      rb_e <= rb_e1;
+
       if( !rb_w && rb_w1 ) begin
 	 rb_w_pulse <= 1'b1;
       end else begin
@@ -623,6 +715,12 @@ module romulator_ddr3(
 	 rb_r_pulse <= 1'b1;
       end else begin
 	 rb_r_pulse <= 1'b0;
+      end
+
+      if( !rb_e && rb_e1 ) begin
+	 rb_e_pulse <= 1'b1;
+      end else begin
+	 rb_e_pulse <= 1'b0;
       end
 
       if( local_reset ) begin
@@ -646,25 +744,30 @@ module romulator_ddr3(
    end
 //   assign nand_rb = !rb_counting || (rb_timer < 12'h4); // this should null out the above logic
    
-   parameter DDR_IDLE     = 3'b1 << 0;
-   parameter DDR_FETCH    = 3'b1 << 1;
-   parameter DDR_WRITE    = 3'b1 << 2;
+   parameter DDR_IDLE     = 4'b1 << 0;
+   parameter DDR_FETCH    = 4'b1 << 1;
+   parameter DDR_WRITE    = 4'b1 << 2;
+   parameter DDR_ERASE    = 4'b1 << 3;
 
-   parameter DDR_nSTATES = 3;
+   parameter DDR_nSTATES = 4;
    reg [(DDR_nSTATES - 1):0] 		 ddr_cstate;
    reg [(DDR_nSTATES - 1):0] 		 ddr_nstate;
+   reg [(DDR_nSTATES - 1):0] 		 ddr_ostate;
 
    reg [11:0] 				 page_addra;
    reg [11:0] 				 requested; // total words requested
    reg [6:0] 				 outstanding; // read words currently outstanding
    reg [4:0] 				 wr_bytes;
    reg [11:0] 				 write_ptr;
+   reg [19:0] 				 erase_ptr;
 
    assign ddr_cstate_dbg = ddr_cstate;
    
    assign nand_rb = !(ddr_cstate != DDR_IDLE);
 
    always @(posedge clk) begin
+      ddr_ostate <= ddr_cstate; // "old state" for pipeline balancing computations
+      
       if(ddr_reset) begin
 	 ddr_cstate <= DDR_IDLE;
       end else begin
@@ -679,6 +782,8 @@ module romulator_ddr3(
 	      ddr_nstate <= DDR_FETCH;
 	   end else if( rb_w_pulse ) begin
 	      ddr_nstate <= DDR_WRITE;
+	   end else if( rb_e_pulse ) begin
+	      ddr_nstate <= DDR_ERASE;
 	   end else begin
 	      ddr_nstate <= DDR_IDLE;
 	   end
@@ -706,8 +811,14 @@ module romulator_ddr3(
 	   end else begin
 	      ddr_nstate <= DDR_WRITE;
 	   end
-`endif
-	     
+`endif // !`ifdef FULL_PAGE_WRITES
+	end // case: DDR_WRITE
+	DDR_ERASE: begin
+	   if( (erase_ptr[19:0] >= 20'h107FF) && (erase_ptr[19:0] != 20'hFFFFF) ) begin
+	      ddr_nstate <= DDR_IDLE; 
+	   end else begin
+	      ddr_nstate <= DDR_ERASE;
+	   end
 	end
       endcase // case (ddr_cstate)
    end // always @ (*)
@@ -719,37 +830,60 @@ module romulator_ddr3(
 
 `ifdef FULL_PAGE_WRITES
    assign ddr3_wr_cmd_en = ddr3_wr_cmd_en_early;
+
+   reg [17:0] row_adr_e_pipe; // pipe the row_adr results; row_adr doesn't change during operations
+   reg [17:0] row_adr_w_pipe; // eases the timing constraints
    
    always @(posedge clk) begin
+      row_adr_e_pipe <= row_adr_e[17:0] * 30'd2112; // pipeline the multiplier
+      row_adr_w_pipe <= row_adr_w[17:0] * 30'd2112;
+      
       // introduce a one-stage delay so wr_adr matches the data coming out of the
       // page read RAM
       // the enable signal to the memory interface is likewise delayed in the state machine
-      ddr3_wr_adr[29:0] <= (row_adr_w[17:0] * 30'd2112) + 
-			      (outstanding[6:0] * 12'd16 + (wr_bytes[4:0] - 5'b1)) * 30'd4 ;
+      ddr3_wr_adr[29:0] <= (ddr_cstate == DDR_ERASE) ? 
+			   (row_adr_e_pipe) +
+			   (erase_ptr[19:0] * 12'd4)
+			   :
+			   (row_adr_w_pipe) + 
+			   (outstanding[6:0] * 12'd16 + (wr_bytes[4:0] - 5'b1)) * 30'd4 ;
       ddr3_wr_dat_en <= ddr3_wr_dat_en_early;
    end
 `else
+   reg [17:0] row_adr_e_pipe; // pipe the row_adr results; row_adr doesn't change during operations
+   reg [17:0] row_adr_w_pipe; // eases the timing constraints
+   
    always @(posedge clk) begin
-   // alernate code here
+      row_adr_e_pipe <= row_adr_e[17:0] * 30'd2112; // pipeline the multiplier
+      row_adr_w_pipe <= row_adr_w[17:0] * 30'd2112;
+
       ddr3_wr_dat_en <= ddr3_wr_dat_en_early;
       ddr3_wr_cmd_en <= ddr3_wr_cmd_en_early;
       
-      ddr3_wr_adr[29:0] <= (row_adr_w[17:0] * 30'd2112) + 
+      ddr3_wr_adr[29:0] <= (ddr_cstate == DDR_ERASE) ?
+			   (row_adr_e_pipe[17:0]) +
+			   (erase_ptr[19:0] * 12'd4)
+			   :
+			   (row_adr_w_pipe[17:0]) + 
 			   {write_ptr[11:2], 2'b0};
-      case(write_ptr[1:0])
-	2'b00: begin
-	   ddr3_wr_mask[3:0] <= 4'b1110;
-	end
-	2'b01: begin
-	   ddr3_wr_mask[3:0] <= 4'b1101;
-	end
-	2'b10: begin
-	   ddr3_wr_mask[3:0] <= 4'b1011;
-	end
-	2'b11: begin
-	   ddr3_wr_mask[3:0] <= 4'b0111;
-	end
-      endcase // case (write_ptr[1:0])
+      if( ddr_cstate == DDR_ERASE ) begin
+	 ddr3_wr_mask[3:0] <= 4'b0;
+      end else begin
+	 case(write_ptr[1:0])
+	   2'b00: begin
+	      ddr3_wr_mask[3:0] <= 4'b1110;
+	   end
+	   2'b01: begin
+	      ddr3_wr_mask[3:0] <= 4'b1101;
+	   end
+	   2'b10: begin
+	      ddr3_wr_mask[3:0] <= 4'b1011;
+	   end
+	   2'b11: begin
+	      ddr3_wr_mask[3:0] <= 4'b0111;
+	   end
+	 endcase // case (write_ptr[1:0])
+      end // else: !if( ddr_cstate == DDR_ERASE )
    end
 `endif
    
@@ -759,7 +893,9 @@ module romulator_ddr3(
 `ifdef FULL_PAGE_WRITES
    assign ddr3_wr_cmd_bl = 6'd15; // write 16 words at a time (actual burst length is bl+1)
 `else
-   assign ddr3_wr_cmd_bl = 6'd0; // write 1 word at a time (actual burst length is bl+1)
+   // write 1 word at a time (actual burst length is bl+1) for writes
+   // 1 word at a time for erases as well (for simplicity)
+   assign ddr3_wr_cmd_bl = (ddr_cstate == DDR_ERASE) ? 6'd0 : 6'd0;
 `endif
    
    always @(posedge clk) begin
@@ -779,8 +915,10 @@ module romulator_ddr3(
 	   outstanding_under <= 1'b0;
 	   ddr3_wr_cmd_en_early <= 1'b0;
 	   write_ptr <= pagewr_start;
+	   erase_ptr <= 20'hFFFFF; // start at -1
 	end
 	DDR_FETCH: begin
+	   erase_ptr <= 20'hFFFFF;
 	   write_ptr <= pagewr_start;
 	   ddr3_wr_dat_en_early <= 1'b0;
 	   ddr3_wr_cmd_en_early <= 1'b0;
@@ -895,13 +1033,38 @@ module romulator_ddr3(
 	      write_ptr <= write_ptr;
 	   end
 `endif // !`ifdef FULL_PAGE_WRITES
-	   
 	   page_addra <= 12'hFFF;
 	   requested <= 12'b0;
 	   ddr3_rd_dat_en <= 1'b0;
 	   page_addra_over <= 1'b0;
 	   outstanding_under <= 1'b0;
-	end
+	   erase_ptr <= 20'hFFFFF;
+	end // case: DDR_WRITE
+	DDR_ERASE: begin
+	   // be a little lazy about the implementation: just issue an erase
+	   // once the command fifo is empty. It means we lose some efficiency
+	   // but it's easier to debug (about 50% efficiency loss due to
+	   // burst length of 4 bytes)
+	   if( ddr3_wr_cmd_empty && 
+	       ((erase_ptr < 20'h107FF) || (erase_ptr == 20'hFFFFF)) ) begin
+	      erase_ptr <= erase_ptr + 20'd1;
+	      ddr3_wr_dat_en_early <= 1'b1;
+	      ddr3_wr_cmd_en_early <= 1'b1;
+	   end else begin
+	      ddr3_wr_cmd_en_early <= 1'b0;
+	      ddr3_wr_dat_en_early <= 1'b0;
+	      erase_ptr <= erase_ptr;
+	   end
+	   // unused variables in this case
+	   outstanding <= outstanding;
+	   wr_bytes <= 5'h0;
+	   page_addra <= 12'hFFF;
+	   requested <= 12'hFF0;
+	   ddr3_rd_dat_en <= 1'b0;
+	   page_addra_over <= 1'b0;
+	   outstanding_under <= 1'b0;
+	   write_ptr <= pagewr_start;
+	end // case: DDR_ERASE
       endcase // case (ddr_cstate)
    end
 
@@ -916,6 +1079,12 @@ module romulator_ddr3(
    end
    
    // 2112-byte page buffer
+   wire [31:0] wr_dat_from_pagebuf;
+   assign ddr3_wr_dat[31:0] = ( ddr_ostate == DDR_ERASE ) ?
+			      32'hFFFF_FFFF
+			      :
+			      wr_dat_from_pagebuf[31:0];
+   
    page_buf2112 pagebuf(
 			// a-port faces the DDR interface (31-bit)
 			.clka(clk),
@@ -929,7 +1098,7 @@ module romulator_ddr3(
 			       write_ptr[11:2] ),
 `endif
 			.dina(ddr3_rd_dat[31:0]),
-			.douta(ddr3_wr_dat[31:0]),
+			.douta(wr_dat_from_pagebuf[31:0]),
 
 			// b-port faces the NAND interface (8-bit)
 			.clkb(clk),
